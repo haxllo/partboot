@@ -1,0 +1,53 @@
+# Direction 6: Release & Packaging Plan
+
+## Goal
+
+Make first-run setup work without manual cache preparation by bundling required EFI binaries in release artifacts, while keeping provenance and verification explicit.
+
+## Scope
+
+### In scope
+- Bundle `grubx64.efi` and `bootx64.efi` in release packages.
+- On first run, copy bundled binaries into `<root>\cache` if cache files are missing.
+- Add checksum metadata for bundled binaries and verify before use.
+- Document bundled binary source/version/signing status in release notes and README.
+
+### Out of scope
+- GRUB source fork/custom GRUB build.
+- Persistent UEFI boot entry automation.
+- Secure Boot signing pipeline redesign.
+
+## Implementation tasks
+
+1. **Define packaged layout**
+   - Add a stable release directory layout for bundled EFI binaries (e.g., `assets\efi\`).
+   - Ensure runtime path resolution works from installed location.
+
+2. **Add binary resolver**
+   - Implement runtime resolver that checks:
+     1. `<root>\cache\grubx64.efi` + `<root>\cache\bootx64.efi`
+     2. bundled asset location
+   - If cache missing and bundled assets present, copy bundled assets into cache.
+
+3. **Add verification**
+   - Add embedded checksums (or manifest file) for bundled binaries.
+   - Verify checksum before copying/using binaries.
+   - Fail with explicit error if verification fails.
+
+4. **Wire into guided flow**
+   - Update `start`/guided flow to call resolver before `stage-efi`.
+   - Keep clear warning messages when fallback/manual action is required.
+
+5. **Release process updates**
+   - Update packaging scripts to include EFI binaries and checksum metadata.
+   - Document artifact contents and provenance.
+
+## Hardcoded/runtime cleanup notes (already addressed)
+- Runtime version string now uses Cargo package version (no hardcoded `0.1.0` string).
+- Boot instructions no longer hardcode a specific Ubuntu ISO filename.
+- 7-Zip absolute install path removed; runtime uses PATH + optional `PARTBOOT_7Z_PATH`.
+
+## Completion criteria
+- Fresh machine with release artifact can run `start` without manual cache file copy.
+- Bundled EFI binaries are checksum-verified before use.
+- Docs/release notes clearly describe bundled binary origin and trust assumptions.
