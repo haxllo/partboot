@@ -13,32 +13,29 @@ attempted.
 
 ## Current Commands
 
+Run commands in this repo with the stable GNU toolchain prefix:
+
 ```powershell
-cargo run -- init --root H:\partboot
-cargo run -- scan --root H:\partboot
-cargo run -- scan --root H:\partboot --json
-cargo run -- extract --root H:\partboot --iso ubuntu-22.04.5-desktop-amd64.iso
-cargo run -- volume-id --drive H:
-cargo run -- generate-menu --root H:\partboot --partition-uuid ABCD-1234 --partition-label partboottest
-cargo run -- generate-menu --root H:\partboot --partition-uuid ABCD-1234 --partition-label partboottest --include-diagnostics
-cargo run -- generate-menu --root H:\partboot --partition-uuid ABCD-1234 --partition-label partboottest --json
-cargo run -- stage-efi --root H:\partboot --grub-x64 C:\path\to\grubx64.efi --boot-x64 C:\path\to\bootx64.efi
-cargo run -- install-esp --root H:\partboot --esp S:\ --dry-run
-cargo run -- install-esp --root H:\partboot --esp S:\ --force
-cargo run -- install-fallback --root H:\partboot --esp S:\ --dry-run
-cargo run -- install-fallback --root H:\partboot --esp S:\ --force
-cargo run -- boot-instructions --esp S:\
-cargo run -- doctor --root H:\partboot
-cargo run -- doctor --root H:\partboot --esp S:\
-cargo run -- doctor --root H:\partboot --esp S:\ --json
-cargo run -- guided-test-flow --root H:\partboot --esp S:\ --partition-uuid 9412B8E612B8CF0C --partition-label partboottest
-cargo run -- guided-test-flow --root H:\partboot --esp S:\ --partition-uuid 9412B8E612B8CF0C --partition-label partboottest --dry-run-install --json
-cargo run -- start
-cargo run -- recommend-test-partitions
+cargo +stable-x86_64-pc-windows-gnu run -- <subcommand>
 ```
 
-Use the real value printed by `volume-id` in place of `ABCD-1234`. For NTFS,
-run `volume-id` or `fsutil fsinfo ntfsinfo H:` from an elevated terminal so the
+```powershell
+cargo run -- init --root <ROOT_PATH>
+cargo run -- scan --root <ROOT_PATH>
+cargo run -- extract --root <ROOT_PATH> --iso <ISO_NAME_OR_PATH>
+cargo run -- volume-id --drive <DRIVE_LETTER:>
+cargo run -- generate-menu --root <ROOT_PATH> --partition-uuid <PARTITION_UUID> --partition-label <PARTITION_LABEL>
+cargo run -- stage-efi --root <ROOT_PATH> --grub-x64 <GRUB_X64_PATH> --boot-x64 <BOOT_X64_PATH>
+cargo run -- install-esp --root <ROOT_PATH> --esp <ESP_PATH> --force
+cargo run -- install-fallback --root <ROOT_PATH> --esp <ESP_PATH> --force
+cargo run -- boot-instructions --esp <ESP_PATH>
+cargo run -- doctor --root <ROOT_PATH> --esp <ESP_PATH>
+cargo run -- guided-test-flow --root <ROOT_PATH> --esp <ESP_PATH> --partition-uuid <PARTITION_UUID> --partition-label <PARTITION_LABEL>
+cargo run -- start
+```
+
+Use the real value printed by `volume-id` in place of `<PARTITION_UUID>`. For NTFS,
+run `volume-id` or `fsutil fsinfo ntfsinfo <DRIVE_LETTER:>` from an elevated terminal so the
 full NTFS serial is available. If the ISO partition has a stable label, pass it
 with `--partition-label` so GRUB has a fallback when firmware/GRUB reports an
 NTFS UUID differently from Windows.
@@ -104,7 +101,7 @@ default and are only included when `--include-diagnostics` is passed.
 Quick path (single command):
 
 ```powershell
-cargo run -- guided-test-flow --root H:\partboot --esp S:\ --partition-uuid 9412B8E612B8CF0C --partition-label partboottest
+cargo run -- guided-test-flow --root <ROOT_PATH> --esp <ESP_PATH> --partition-uuid <PARTITION_UUID> --partition-label <PARTITION_LABEL>
 ```
 
 Interactive quick path (detect partitions, prompt for selections):
@@ -139,14 +136,14 @@ See `docs/release-efi-provenance.md` for required provenance notes per release.
 Safe step-by-step path:
 
 ```powershell
-cargo run -- init --root H:\partboot
-cargo run -- scan --root H:\partboot
-cargo run -- extract --root H:\partboot --iso ubuntu-22.04.5-desktop-amd64.iso
-cargo run -- generate-menu --root H:\partboot --partition-uuid 9412B8E612B8CF0C --partition-label partboottest
-cargo run -- stage-efi --root H:\partboot --grub-x64 H:\partboot\cache\grubx64.efi --boot-x64 H:\partboot\cache\bootx64.efi
-cargo run -- install-esp --root H:\partboot --esp S:\ --force
-cargo run -- install-fallback --root H:\partboot --esp S:\ --force
-cargo run -- doctor --root H:\partboot --esp S:\
+cargo run -- init --root <ROOT_PATH>
+cargo run -- scan --root <ROOT_PATH>
+cargo run -- extract --root <ROOT_PATH> --iso <ISO_NAME_OR_PATH>
+cargo run -- generate-menu --root <ROOT_PATH> --partition-uuid <PARTITION_UUID> --partition-label <PARTITION_LABEL>
+cargo run -- stage-efi --root <ROOT_PATH> --grub-x64 <ROOT_PATH>\cache\grubx64.efi --boot-x64 <ROOT_PATH>\cache\bootx64.efi
+cargo run -- install-esp --root <ROOT_PATH> --esp <ESP_PATH> --force
+cargo run -- install-fallback --root <ROOT_PATH> --esp <ESP_PATH> --force
+cargo run -- doctor --root <ROOT_PATH> --esp <ESP_PATH>
 ```
 
 For automation, `scan`, `generate-menu`, `doctor`, and `guided-test-flow` support `--json`.
@@ -194,6 +191,20 @@ The shutdown loop follow-up plan is in
 `docs/plans/2026-05-07-shutdown-loop-fix.md`.
 
 ## Troubleshooting
+
+### Common command errors
+
+- `error: missing or unreadable checksum manifest ... assets\efi\checksums.txt`  
+  Cause: bundled EFI checksum manifest is missing.  
+  Fix:
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Target x86_64-pc-windows-gnu -RefreshChecksums
+  ```
+
+- `rustc ... is not supported` while running cargo commands  
+  Cause: wrong/default toolchain.  
+  Fix: run with `+stable-x86_64-pc-windows-gnu` prefix.
 
 ### Ubuntu Boots But Shutdown Shows loop0 I/O Errors
 
