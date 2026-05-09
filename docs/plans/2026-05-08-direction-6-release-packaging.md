@@ -42,6 +42,18 @@ Make first-run setup work without manual cache preparation by bundling required 
    - Update packaging scripts to include EFI binaries and checksum metadata.
    - Document artifact contents and provenance.
 
+## Progress
+
+- Implemented runtime bundled EFI resolver in guided flow:
+  - checks cache first,
+  - falls back to bundled assets (`assets\efi` or `PARTBOOT_EFI_ASSETS`),
+  - verifies checksum manifest before copy.
+- Added `assets\efi\README.txt` with expected bundled layout and checksum format.
+- Added release packaging script: `scripts\package-release.ps1`.
+- Added release provenance template: `docs\release-efi-provenance.md`.
+- Validated packaging script by producing `dist\partboot-0.1.0-x86_64-pc-windows-gnu.zip`.
+- Remaining validation: run clean-machine release bundle test and record final provenance values.
+
 ## Hardcoded/runtime cleanup notes (already addressed)
 - Runtime version string now uses Cargo package version (no hardcoded `0.1.0` string).
 - Boot instructions no longer hardcode a specific Ubuntu ISO filename.

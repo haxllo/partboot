@@ -114,7 +114,27 @@ cargo run -- start
 ```
 
 `start` auto-imports ISO files from the selected drive root (for example
-`H:\ubuntu.iso`) into `H:\partboot\isos\` when `partboot\isos` is empty.
+`H:\ubuntu.iso`) into `H:\partboot\isos\` when `partboot\isos` is empty. It
+tries move-first (same drive) to avoid requiring double disk space.
+`start` now also auto-populates `H:\partboot\cache` from bundled EFI assets
+(`assets\efi`) when cache binaries are missing, after checksum verification.
+Override asset location with `PARTBOOT_EFI_ASSETS`.
+
+## Release packaging
+
+Build a release bundle with bundled EFI assets:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Target x86_64-pc-windows-gnu
+```
+
+If EFI binaries were replaced, regenerate and verify checksums while packaging:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Target x86_64-pc-windows-gnu -RefreshChecksums
+```
+
+See `docs/release-efi-provenance.md` for required provenance notes per release.
 
 Safe step-by-step path:
 

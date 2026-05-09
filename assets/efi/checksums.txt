@@ -1,0 +1,2 @@
+grubx64.efi=F24B161C
+bootx64.efi=FAA8033D

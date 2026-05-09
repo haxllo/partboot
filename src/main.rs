@@ -15,8 +15,14 @@ use crate::profile::{
 use std::env;
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::thread;
+use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Command {
@@ -489,10 +495,13 @@ fn run_guided_test_flow(
     };
 
     let extracted_target = if let Some(iso_name) = selected_iso {
-        extract_casper(&layout, &iso_name)?;
-        ensure_profile_for_iso_name(&layout, &iso_name)?;
+        let extract_label = format!("extract {}", iso_name);
+        run_with_spinner(!json, &extract_label, || {
+            extract_casper(&layout, &iso_name)?;
+            ensure_profile_for_iso_name(&layout, &iso_name)?;
+            Ok(())
+        })?;
         if !json {
-            println!("[step] extract");
             println!("[ok] extracted {}", iso_name);
         }
         Some(iso_name)
@@ -506,32 +515,39 @@ fn run_guided_test_flow(
     images = scan_iso_dir(&layout.isos).map_err(|error| error.to_string())?;
     mark_extracted_images(&layout, &mut images);
     let profiles = load_profiles_for_images(&layout, &images)?;
-    let cfg = generate_grub_cfg(
-        &images,
-        &partition_uuid,
-        partition_label.as_deref(),
-        include_diagnostics,
-        &profiles,
-    );
     let generated_cfg = layout.grub_cfg_path();
-    if let Some(parent) = generated_cfg.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    fs::write(&generated_cfg, cfg).map_err(|error| error.to_string())?;
+    run_with_spinner(!json, "generate-menu", || {
+        let cfg = generate_grub_cfg(
+            &images,
+            &partition_uuid,
+            partition_label.as_deref(),
+            include_diagnostics,
+            &profiles,
+        );
+        if let Some(parent) = generated_cfg.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::write(&generated_cfg, cfg).map_err(|error| error.to_string())?;
+        Ok(())
+    })?;
     if !json {
-        println!("[step] generate-menu");
         println!("[ok] wrote {}", generated_cfg.display());
     }
 
-    let grub_x64 = layout.cache.join("grubx64.efi");
-    let boot_x64 = layout.cache.join("bootx64.efi");
-    if !grub_x64.exists() || !boot_x64.exists() {
-        return Err(format!(
-            "missing staged binaries in {}; expected grubx64.efi and bootx64.efi",
-            layout.cache.display()
-        ));
+    let efi_binaries = resolve_efi_binaries_for_stage(&layout)?;
+    if !json && efi_binaries.copied_from_bundle {
+        println!("[step] cache");
+        println!(
+            "[ok] populated cache binaries from {}",
+            efi_binaries.source
+        );
     }
-    let staged = stage_efi(&layout, &grub_x64, Some(&boot_x64), None)?;
+    let staged = stage_efi(
+        &layout,
+        &efi_binaries.grub_x64,
+        Some(&efi_binaries.boot_x64),
+        None,
+    )?;
     if !json {
         println!("[step] stage-efi");
         println!("[ok] staged {}", staged.display());
@@ -560,7 +576,7 @@ fn run_guided_test_flow(
             .map(|path| format!("\"{}\"", json_escape(&path.to_string_lossy())))
             .collect();
         println!(
-            "{{\"root\":\"{}\",\"esp\":\"{}\",\"partition_uuid\":\"{}\",\"partition_label\":\"{}\",\"image_count\":{},\"imported_drive_root_isos\":{},\"created_profiles\":[{}],\"extracted_iso\":\"{}\",\"generated_cfg\":\"{}\",\"staged_dir\":\"{}\",\"dry_run_install\":{},\"doctor\":{{\"full_ntfs_uuid_present\":\"{}\",\"extracted_files_complete\":\"{}\",\"profiles_present\":\"{}\",\"esp_files_installed\":\"{}\",\"fallback_installed\":\"{}\"}}}}",
+            "{{\"root\":\"{}\",\"esp\":\"{}\",\"partition_uuid\":\"{}\",\"partition_label\":\"{}\",\"image_count\":{},\"imported_drive_root_isos\":{},\"created_profiles\":[{}],\"extracted_iso\":\"{}\",\"generated_cfg\":\"{}\",\"staged_dir\":\"{}\",\"efi_binary_source\":\"{}\",\"dry_run_install\":{},\"doctor\":{{\"full_ntfs_uuid_present\":\"{}\",\"extracted_files_complete\":\"{}\",\"profiles_present\":\"{}\",\"esp_files_installed\":\"{}\",\"fallback_installed\":\"{}\"}}}}",
             json_escape(&layout.root.to_string_lossy()),
             json_escape(&esp.to_string_lossy()),
             json_escape(&partition_uuid),
@@ -571,6 +587,7 @@ fn run_guided_test_flow(
             json_escape(extracted_target.as_deref().unwrap_or("")),
             json_escape(&generated_cfg.to_string_lossy()),
             json_escape(&staged.to_string_lossy()),
+            json_escape(&efi_binaries.source),
             if dry_run_install { "true" } else { "false" },
             json_escape(&ntfs_uuid_status),
             json_escape(&extracted_status),
@@ -620,17 +637,236 @@ fn import_drive_root_isos(layout: &PartBootLayout) -> Result<Vec<PathBuf>, Strin
         if destination.exists() {
             continue;
         }
-        fs::copy(&path, &destination).map_err(|error| {
-            format!(
-                "failed copying {} to {}: {}",
-                path.display(),
-                destination.display(),
-                error
-            )
-        })?;
+        import_iso_from_drive_root(&path, &destination)?;
         imported.push(destination);
     }
     Ok(imported)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImportMode {
+    Moved,
+    Copied,
+}
+
+fn import_iso_from_drive_root(source: &Path, destination: &Path) -> Result<ImportMode, String> {
+    match fs::rename(source, destination) {
+        Ok(()) => Ok(ImportMode::Moved),
+        Err(rename_error) => fs::copy(source, destination)
+            .map(|_| ImportMode::Copied)
+            .map_err(|copy_error| {
+                format!(
+                    "failed importing {} to {}: rename failed ({}) and copy failed ({})",
+                    source.display(),
+                    destination.display(),
+                    rename_error,
+                    copy_error
+                )
+            }),
+    }
+}
+
+fn run_with_spinner<T, F>(enabled: bool, label: &str, operation: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String>,
+{
+    if !enabled {
+        return operation();
+    }
+
+    let label_owned = label.to_string();
+    let done = Arc::new(AtomicBool::new(false));
+    let done_thread = Arc::clone(&done);
+    let spinner_label = label_owned.clone();
+    let spinner = thread::spawn(move || {
+        let frames = ['|', '/', '-', '\\'];
+        let mut index = 0usize;
+        while !done_thread.load(Ordering::Relaxed) {
+            let _ = write!(
+                io::stdout(),
+                "\r[work] {} {}",
+                spinner_label,
+                frames[index % frames.len()]
+            );
+            let _ = io::stdout().flush();
+            index = index.wrapping_add(1);
+            thread::sleep(Duration::from_millis(120));
+        }
+    });
+
+    let result = operation();
+    done.store(true, Ordering::Relaxed);
+    let _ = spinner.join();
+
+    let clear_width = label_owned.len() + 16;
+    let _ = write!(io::stdout(), "\r{}\r", " ".repeat(clear_width));
+    let _ = io::stdout().flush();
+
+    result
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EfiBinaryPaths {
+    grub_x64: PathBuf,
+    boot_x64: PathBuf,
+    source: String,
+    copied_from_bundle: bool,
+}
+
+fn resolve_efi_binaries_for_stage(layout: &PartBootLayout) -> Result<EfiBinaryPaths, String> {
+    let cache_grub = layout.cache.join("grubx64.efi");
+    let cache_boot = layout.cache.join("bootx64.efi");
+    if cache_grub.exists() && cache_boot.exists() {
+        return Ok(EfiBinaryPaths {
+            grub_x64: cache_grub,
+            boot_x64: cache_boot,
+            source: layout.cache.display().to_string(),
+            copied_from_bundle: false,
+        });
+    }
+
+    let bundled_dir = locate_bundled_efi_dir()
+        .ok_or_else(|| {
+            format!(
+                "missing staged binaries in {} and no bundled EFI assets found. Expected grubx64.efi and bootx64.efi in cache, or packaged assets under assets\\efi",
+                layout.cache.display()
+            )
+        })?;
+    verify_bundled_efi_checksums(&bundled_dir)?;
+    fs::create_dir_all(&layout.cache).map_err(|error| error.to_string())?;
+    fs::copy(bundled_dir.join("grubx64.efi"), &cache_grub).map_err(|error| {
+        format!(
+            "failed to copy bundled grubx64.efi into {}: {}",
+            cache_grub.display(),
+            error
+        )
+    })?;
+    fs::copy(bundled_dir.join("bootx64.efi"), &cache_boot).map_err(|error| {
+        format!(
+            "failed to copy bundled bootx64.efi into {}: {}",
+            cache_boot.display(),
+            error
+        )
+    })?;
+
+    Ok(EfiBinaryPaths {
+        grub_x64: cache_grub,
+        boot_x64: cache_boot,
+        source: bundled_dir.display().to_string(),
+        copied_from_bundle: true,
+    })
+}
+
+fn locate_bundled_efi_dir() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(configured) = env::var("PARTBOOT_EFI_ASSETS") {
+        let configured = configured.trim();
+        if !configured.is_empty() {
+            let configured_path = PathBuf::from(configured);
+            candidates.push(configured_path.clone());
+            candidates.push(configured_path.join("efi"));
+        }
+    }
+
+    if let Ok(exe_path) = env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("assets").join("efi"));
+            if let Some(parent) = exe_dir.parent() {
+                candidates.push(parent.join("assets").join("efi"));
+            }
+        }
+    }
+
+    if let Ok(current_dir) = env::current_dir() {
+        candidates.push(current_dir.join("assets").join("efi"));
+    }
+
+    candidates
+        .into_iter()
+        .find(|candidate| has_required_efi_files(candidate))
+}
+
+fn has_required_efi_files(dir: &Path) -> bool {
+    dir.join("grubx64.efi").exists() && dir.join("bootx64.efi").exists()
+}
+
+fn verify_bundled_efi_checksums(dir: &Path) -> Result<(), String> {
+    let manifest_path = dir.join("checksums.txt");
+    let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
+        format!(
+            "missing or unreadable checksum manifest {}: {}",
+            manifest_path.display(),
+            error
+        )
+    })?;
+    let checksums = parse_checksum_manifest(&manifest)?;
+    verify_checksum_entry(dir, &checksums, "grubx64.efi")?;
+    verify_checksum_entry(dir, &checksums, "bootx64.efi")?;
+    Ok(())
+}
+
+fn verify_checksum_entry(
+    dir: &Path,
+    checksums: &[(String, String)],
+    file_name: &str,
+) -> Result<(), String> {
+    let expected = checksums
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(file_name))
+        .map(|(_, checksum)| checksum.clone())
+        .ok_or_else(|| format!("checksum entry missing for {file_name}"))?;
+    let file_path = dir.join(file_name);
+    let actual = file_crc32_hex(&file_path)?;
+    if actual.eq_ignore_ascii_case(&expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "checksum mismatch for {}: expected {}, got {}",
+            file_path.display(),
+            expected,
+            actual
+        ))
+    }
+}
+
+fn parse_checksum_manifest(content: &str) -> Result<Vec<(String, String)>, String> {
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let (name, checksum) = trimmed
+            .split_once('=')
+            .ok_or_else(|| format!("invalid checksum line: {trimmed}"))?;
+        let name = name.trim().to_string();
+        let checksum = checksum.trim().to_ascii_uppercase();
+        if name.is_empty() || checksum.is_empty() {
+            return Err(format!("invalid checksum line: {trimmed}"));
+        }
+        if !checksum.chars().all(|ch| ch.is_ascii_hexdigit()) || checksum.len() != 8 {
+            return Err(format!("invalid checksum for {name}: {checksum}"));
+        }
+        entries.push((name, checksum));
+    }
+    Ok(entries)
+}
+
+fn file_crc32_hex(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|error| format!("failed to read {}: {}", path.display(), error))?;
+    Ok(format!("{:08X}", crc32(&bytes)))
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for byte in bytes {
+        crc ^= *byte as u32;
+        for _ in 0..8 {
+            let mask = if crc & 1 == 1 { 0xEDB8_8320 } else { 0 };
+            crc = (crc >> 1) ^ mask;
+        }
+    }
+    !crc
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1754,6 +1990,51 @@ mod tests {
         assert!(is_full_hex_uuid("9412-B8E6-12B8-CF0C"));
         assert!(!is_full_hex_uuid("12B8CF0C"));
         assert!(!is_full_hex_uuid("XYZ-1234"));
+    }
+
+    #[test]
+    fn parse_checksum_manifest_accepts_basic_format() {
+        let manifest = "\
+            # bundled efi checksums\n\
+            grubx64.efi=DEADBEEF\n\
+            bootx64.efi=CAFEBABE\n";
+        let entries = parse_checksum_manifest(manifest).unwrap();
+        assert_eq!(
+            entries,
+            vec![
+                ("grubx64.efi".to_string(), "DEADBEEF".to_string()),
+                ("bootx64.efi".to_string(), "CAFEBABE".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn crc32_matches_known_value() {
+        assert_eq!(format!("{:08X}", crc32(b"123456789")), "CBF43926");
+    }
+
+    #[test]
+    fn import_iso_from_drive_root_moves_file_when_possible() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("partboot-import-test-{unique}"));
+        let source_dir = base.join("source");
+        let destination_dir = base.join("dest");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&destination_dir).unwrap();
+
+        let source = source_dir.join("sample.iso");
+        let destination = destination_dir.join("sample.iso");
+        std::fs::write(&source, b"iso-bytes").unwrap();
+
+        let mode = import_iso_from_drive_root(&source, &destination).unwrap();
+        assert_eq!(mode, ImportMode::Moved);
+        assert!(!source.exists());
+        assert!(destination.exists());
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

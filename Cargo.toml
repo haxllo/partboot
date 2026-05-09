@@ -2,7 +2,13 @@
 name = "partboot"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.95"
 license = "MIT"
 description = "Disk-resident ISO boot manager prototype"
+repository = "https://github.com/haxllo/partboot.git"
+readme = "README.md"
+keywords = ["partition", "boot", "iso", "grub", "linux"]
+categories = ["command-line-utilities"]
+exclude = ["dist/**", "target/**"]
 
 [dependencies]
