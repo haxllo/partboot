@@ -6,6 +6,37 @@ use std::process::Command;
 
 const CASPER_FILES: [&str; 3] = ["vmlinuz", "initrd", "filesystem.squashfs"];
 
+// More robust candidate lists for different distro ISO layouts.
+const VMLINUZ_CANDIDATES: [&str; 7] = [
+    "casper/vmlinuz",
+    "live/vmlinuz",
+    "install/vmlinuz",
+    "vmlinuz",
+    "boot/vmlinuz",
+    "casper/kernel",
+    "kernel/vmlinuz",
+];
+
+const INITRD_CANDIDATES: [&str; 8] = [
+    "casper/initrd",
+    "casper/initrd.img",
+    "casper/initrd.lz",
+    "casper/initrd.gz",
+    "live/initrd.img",
+    "install/initrd.lz",
+    "initrd.img",
+    "initrd",
+];
+
+const SQUASHFS_CANDIDATES: [&str; 6] = [
+    "casper/filesystem.squashfs",
+    "live/filesystem.squashfs",
+    "filesystem.squashfs",
+    "casper/squashfs",
+    "live/filesystem.squash",
+    "casper/filesystem.squash",
+];
+
 pub fn extracted_id_from_iso_name(iso_name: &str) -> String {
     let stem = iso_name
         .strip_suffix(".iso")
@@ -41,6 +72,60 @@ pub fn is_complete_extracted_casper(layout: &PartBootLayout, extracted_id: &str)
     CASPER_FILES.iter().all(|file| casper.join(file).exists())
 }
 
+fn try_extract_candidates(
+    iso_path: &Path,
+    candidates: &[&str],
+    destination: &Path,
+    canonical: &str,
+) -> Result<bool, String> {
+    for cand in candidates {
+        match run_7z_extract(iso_path, cand, destination) {
+            Ok(()) => {
+                // basename of the candidate (what 7z will write)
+                if let Some(basename) = Path::new(cand).file_name().and_then(|s| s.to_str()) {
+                    let extracted_file = destination.join(basename);
+                    if extracted_file.exists() {
+                        fs::rename(&extracted_file, destination.join(canonical))
+                            .map_err(|e| e.to_string())?;
+                        return Ok(true);
+                    }
+
+                    // sometimes 7z extracts with slightly different names or strips path; try to find a file that ends with basename
+                    if let Ok(entries) = fs::read_dir(destination) {
+                        for entry in entries.flatten() {
+                            if let Ok(name) = entry.file_name().into_string() {
+                                if name.ends_with(basename) {
+                                    fs::rename(entry.path(), destination.join(canonical))
+                                        .map_err(|e| e.to_string())?;
+                                    return Ok(true);
+                                }
+                            }
+                        }
+                    }
+
+                    // fallback: if candidate was directory-like, try to look for known canonical file inside destination
+                    if destination.join(canonical).exists() {
+                        return Ok(true);
+                    }
+                } else {
+                    // no basename - try to pick any new file in directory
+                    if let Ok(mut entries) = fs::read_dir(destination) {
+                        if let Some(Ok(entry)) = entries.next() {
+                            fs::rename(entry.path(), destination.join(canonical))
+                                .map_err(|e| e.to_string())?;
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+            Err(_) => {
+                // try next candidate
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub fn extract_casper(layout: &PartBootLayout, iso_arg: &str) -> Result<String, String> {
     let iso_path = resolve_iso_path(layout, iso_arg)?;
     let iso_name = iso_path
@@ -51,18 +136,34 @@ pub fn extract_casper(layout: &PartBootLayout, iso_arg: &str) -> Result<String, 
     let destination = casper_dir(layout, &extracted_id);
     fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
 
-    for file in CASPER_FILES {
-        run_7z_extract(&iso_path, &format!("casper\\{file}"), &destination)?;
+    let mut missing = Vec::new();
+
+    let v_ok = try_extract_candidates(&iso_path, &VMLINUZ_CANDIDATES, &destination, "vmlinuz")
+        .map_err(|e| e.to_string())?;
+    if !v_ok {
+        missing.push(format!("vmlinuz (tried: {})", VMLINUZ_CANDIDATES.join(", ")));
+    }
+
+    let i_ok = try_extract_candidates(&iso_path, &INITRD_CANDIDATES, &destination, "initrd")
+        .map_err(|e| e.to_string())?;
+    if !i_ok {
+        missing.push(format!("initrd (tried: {})", INITRD_CANDIDATES.join(", ")));
+    }
+
+    let s_ok = try_extract_candidates(&iso_path, &SQUASHFS_CANDIDATES, &destination, "filesystem.squashfs")
+        .map_err(|e| e.to_string())?;
+    if !s_ok {
+        missing.push(format!("filesystem.squashfs (tried: {})", SQUASHFS_CANDIDATES.join(", ")));
     }
 
     if !is_complete_extracted_casper(layout, &extracted_id) {
         return Err(format!(
-            "extraction incomplete for {}; expected vmlinuz, initrd, and filesystem.squashfs",
-            extracted_id
+            "extraction incomplete for {}; missing: {}",
+            extracted_id,
+            missing.join("; ")
         ));
     }
-
-    Ok(extracted_id)
+    Ok(extracted_id)
 }
 
 fn resolve_iso_path(layout: &PartBootLayout, iso_arg: &str) -> Result<PathBuf, String> {
