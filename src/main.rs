@@ -882,18 +882,53 @@ fn download_file_powershell(url: &str, destination: &Path) -> Result<(), String>
         .output()
         .map_err(|error| format!("failed to invoke PowerShell for {}: {}", url, error))?;
     if output.status.success() {
-        Ok(())
+        return Ok(());
+    }
+
+    let ps_stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let ps_stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let ps_details = if !ps_stderr.is_empty() {
+        ps_stderr
+    } else if !ps_stdout.is_empty() {
+        ps_stdout
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let details = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            "unknown download failure".to_string()
-        };
-        Err(format!("failed downloading {}: {}", url, details))
+        "unknown PowerShell download failure".to_string()
+    };
+
+    let destination_owned = destination.to_string_lossy().to_string();
+    let curl_output = process::Command::new("curl.exe")
+        .args([
+            "--location",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--output",
+            &destination_owned,
+            url,
+        ])
+        .output();
+
+    match curl_output {
+        Ok(curl) if curl.status.success() => Ok(()),
+        Ok(curl) => {
+            let curl_stderr = String::from_utf8_lossy(&curl.stderr).trim().to_string();
+            let curl_stdout = String::from_utf8_lossy(&curl.stdout).trim().to_string();
+            let curl_details = if !curl_stderr.is_empty() {
+                curl_stderr
+            } else if !curl_stdout.is_empty() {
+                curl_stdout
+            } else {
+                "unknown curl download failure".to_string()
+            };
+            Err(format!(
+                "failed downloading {}: PowerShell error: {}; curl.exe error: {}",
+                url, ps_details, curl_details
+            ))
+        }
+        Err(error) => Err(format!(
+            "failed downloading {}: PowerShell error: {}; curl.exe unavailable: {}",
+            url, ps_details, error
+        )),
     }
 }
 

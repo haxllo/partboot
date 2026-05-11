@@ -40,7 +40,7 @@ Local-only bypass flags exist for non-release testing:
 - `-SkipStandaloneGrubBuild`
 - `-SkipProvenanceCheck`
 
-## Current release record (v0.1.2)
+## Current release record (v0.1.3)
 
 Status: **complete**
 

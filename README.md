@@ -117,6 +117,7 @@ tries move-first (same drive) to avoid requiring double disk space.
 (`assets\efi`) when cache binaries are missing, after checksum verification.
 If bundled assets are unavailable, PartBoot attempts a fallback download from
 GitHub Releases (`v<app-version>`) and verifies checksums before caching.
+The downloader tries PowerShell first, then `curl.exe` as a fallback.
 Override asset location with `PARTBOOT_EFI_ASSETS`.
 Override release source with `PARTBOOT_EFI_RELEASE_BASE` and
 `PARTBOOT_EFI_RELEASE_TAG`.
