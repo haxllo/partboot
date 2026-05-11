@@ -20,31 +20,49 @@ This file records provenance for bundled EFI binaries included in PartBoot relea
 ## Release update checklist
 
 1. Replace `grubx64.efi` and `bootx64.efi` in `assets/efi`.
-2. Run `scripts/package-release.ps1 -RefreshChecksums`.
-3. Verify the script reports checksum validation success.
-4. Update this file with release-specific provenance notes.
-5. Include this file in the packaged release artifact.
+2. Rebuild `grubx64.efi` as standalone GRUB (`scripts/build-standalone-grub.ps1`).
+3. Run `scripts/package-release.ps1 -RefreshChecksums`.
+4. Ensure provenance fields below are fully filled (no `Unknown` values; not `provisional`).
+5. Verify the script reports checksum validation success.
+6. Update this file with release-specific provenance notes.
+7. Include this file in the packaged release artifact.
 
-## Current release record (v0.1.0)
+## Packaging gate behavior
 
-Status: **provisional** (original source ISO metadata not yet recorded).
+`scripts/package-release.ps1` now fails by default when:
 
-- Source distribution: **Unknown (to be confirmed)**
-- Source image name/path: **Unknown (to be confirmed)**
-- Source image hash (SHA256): **Unknown (to be confirmed)**
+- provenance status is `provisional`
+- any required provenance field is `Unknown (to be confirmed)`
+- `bootx64.efi` is unsigned or has missing signer metadata
+
+Local-only bypass flags exist for non-release testing:
+
+- `-SkipStandaloneGrubBuild`
+- `-SkipProvenanceCheck`
+
+## Current release record (v0.1.1)
+
+Status: **complete**
+
+- Source distribution: **Ubuntu 25.10 desktop amd64**
+- Source image name/path: `E:\ubuntu-25.10-desktop-amd64.iso`
+- Source image hash (SHA256): `32E30D72AE4798C633323A2684D94A11582BB03A6AB38D2B0D5AE5EABC5E577B`
 - Extraction paths used:
-  - `EFI/BOOT/grubx64.efi` -> `assets/efi/grubx64.efi`
-  - `EFI/BOOT/BOOTx64.EFI` (or shim fallback equivalent) -> `assets/efi/bootx64.efi`
+  - `EFI\boot\bootx64.efi` -> `assets/efi/bootx64.efi`
+  - `assets/efi/grubx64.efi` is rebuilt as standalone GRUB via:
+    - `scripts/build-standalone-grub.ps1` (bootstrap config from `$cmdpath`)
+    - `grub-mkstandalone (GRUB) 2.12-1ubuntu7.3` (WSL Ubuntu)
 - Local bundled file hashes (SHA256):
-  - `assets/efi/grubx64.efi` = `9329EBF0F4DA03234A6E7349A0C6469B8CBC64EC748E62115643F34C813CE7FE`
+  - `assets/efi/grubx64.efi` = `0D27908B6F8270E7F3278B044F588F703A9F8363DBB0C18D420232D0E0DD1A0D`
   - `assets/efi/bootx64.efi` = `4C89145E958CF592A6F16552EADF112EF2C1C525E2435C2761E6A99FA88188B3`
-  - `assets/efi/checksums.txt` = `A056FC36C804A77B33886BA7283F53B30318CC1CABFCA346D5ED402602F229C8`
+  - `assets/efi/checksums.txt` = `268EEF19EBA0282458425D2A7007ACF6850107A36B24EC4349721432F940C7A3`
 - Manifest values (CRC32):
-  - `grubx64.efi=F24B161C`
+  - `grubx64.efi=05A6E630`
   - `bootx64.efi=FAA8033D`
 - Signing/trust note:
-  - Files are treated as vendor-provided EFI binaries extracted from a distro ISO path.
-  - Secure Boot trust is firmware-dependent; keep shim/bootx64 path available and validate on target hardware.
+  - `bootx64.efi` is vendor-signed (`Microsoft Windows UEFI Driver Publisher`).
+  - `grubx64.efi` is a local standalone build and is currently unsigned.
+  - Secure Boot must remain disabled unless a signed GRUB/shim chain is introduced.
 
 ## How to fill missing source metadata
 

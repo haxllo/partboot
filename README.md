@@ -125,10 +125,22 @@ Build a release bundle with bundled EFI assets:
 powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Target x86_64-pc-windows-gnu
 ```
 
+By default, packaging now:
+- checks `docs\release-efi-provenance.md` and fails if provenance is provisional/unknown
+- rebuilds `assets\efi\grubx64.efi` using `scripts\build-standalone-grub.ps1` (`grub-mkstandalone`)
+
+CI now includes a required OVMF/QEMU EFI smoke test (`.github/workflows/efi-smoke.yml`) that must reach a GRUB menu entry (not `grub rescue>`).
+
 If EFI binaries were replaced, regenerate and verify checksums while packaging:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Target x86_64-pc-windows-gnu -RefreshChecksums
+```
+
+Local-only bypass options (not for release):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Target x86_64-pc-windows-gnu -SkipStandaloneGrubBuild -SkipProvenanceCheck
 ```
 
 See `docs/release-efi-provenance.md` for required provenance notes per release.

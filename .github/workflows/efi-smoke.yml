@@ -1,0 +1,25 @@
+name: efi-smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  ovmf-qemu-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install smoke test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+
+      - name: Run EFI smoke test
+        run: |
+          chmod +x scripts/efi-smoke-test.sh
+          scripts/efi-smoke-test.sh

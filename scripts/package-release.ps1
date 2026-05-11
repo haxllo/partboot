@@ -1,7 +1,9 @@
 param(
     [string]$Target = "x86_64-pc-windows-gnu",
     [string]$OutputRoot = "dist",
-    [switch]$RefreshChecksums
+    [switch]$RefreshChecksums,
+    [switch]$SkipStandaloneGrubBuild,
+    [switch]$SkipProvenanceCheck
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,16 +46,71 @@ function Get-ChecksumsMap([string]$ManifestPath) {
     return $map
 }
 
+function Assert-ProvenanceComplete([string]$ProvenancePath) {
+    if (!(Test-Path $ProvenancePath)) {
+        throw "Missing provenance document: $ProvenancePath"
+    }
+
+    $content = Get-Content $ProvenancePath -Raw
+    $releaseSectionPattern = "(?s)##\s*Current release record.*?(?=^##\s|\z)"
+    $releaseSection = [System.Text.RegularExpressions.Regex]::Match(
+        $content,
+        $releaseSectionPattern,
+        [System.Text.RegularExpressions.RegexOptions]::Multiline
+    ).Value
+    if ([string]::IsNullOrWhiteSpace($releaseSection)) {
+        throw "Could not find 'Current release record' section in $ProvenancePath"
+    }
+
+    if ($releaseSection -match "Status:\s*\*\*provisional\*\*" -or $releaseSection -match "Unknown \(to be confirmed\)") {
+        throw "EFI provenance is incomplete in ${ProvenancePath}. Fill all source ISO/hash/signing fields before packaging."
+    }
+}
+
+function Assert-EfiSignatureMetadata([string]$Path, [bool]$RequireSigned = $true) {
+    $signature = Get-AuthenticodeSignature $Path
+    if ($signature.Status -eq "NotSigned") {
+        if ($RequireSigned) {
+            throw "EFI binary is unsigned: $Path"
+        }
+        Write-Host "[warn] EFI binary is unsigned (allowed): $Path"
+        return
+    }
+    if ($null -eq $signature.SignerCertificate) {
+        throw "EFI binary signer certificate metadata missing: $Path"
+    }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $cargoToml = Join-Path $repoRoot "Cargo.toml"
 $efiDir = Join-Path $repoRoot "assets\efi"
 $manifestPath = Join-Path $efiDir "checksums.txt"
 $grubPath = Join-Path $efiDir "grubx64.efi"
 $bootPath = Join-Path $efiDir "bootx64.efi"
+$provenancePath = Join-Path $repoRoot "docs\release-efi-provenance.md"
+$standaloneScript = Join-Path $repoRoot "scripts\build-standalone-grub.ps1"
 
 if (!(Test-Path $cargoToml)) { throw "Cargo.toml not found at $cargoToml" }
+if (!(Test-Path $standaloneScript)) { throw "Missing $standaloneScript" }
+
+if (-not $SkipProvenanceCheck) {
+    Assert-ProvenanceComplete $provenancePath
+    Write-Host "[ok] provenance check passed"
+}
+
+if (-not $SkipStandaloneGrubBuild) {
+    Write-Host "[step] build standalone grubx64.efi"
+    & $standaloneScript -OutputPath $grubPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Standalone GRUB build failed (exit code $LASTEXITCODE)"
+    }
+}
+
 if (!(Test-Path $grubPath)) { throw "Missing $grubPath" }
 if (!(Test-Path $bootPath)) { throw "Missing $bootPath" }
+Assert-EfiSignatureMetadata $grubPath $false
+Assert-EfiSignatureMetadata $bootPath $true
+Write-Host "[ok] EFI signature metadata check passed"
 
 $versionLine = Get-Content $cargoToml | Where-Object { $_ -match '^version\s*=' } | Select-Object -First 1
 if (-not $versionLine) { throw "Could not find version in Cargo.toml" }
