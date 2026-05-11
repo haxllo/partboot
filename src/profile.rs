@@ -49,7 +49,8 @@ pub fn ensure_profile_for_iso_name(
     iso_name: &str,
 ) -> Result<Option<PathBuf>, String> {
     let lower = iso_name.to_ascii_lowercase();
-    if classify_name(&lower) != IsoFamily::UbuntuCasper {
+    let family = classify_name(&lower);
+    if !is_supported_profile_family(&family) {
         return Ok(None);
     }
 
@@ -59,7 +60,7 @@ pub fn ensure_profile_for_iso_name(
         return Ok(None);
     }
 
-    let content = default_ubuntu_profile(iso_name);
+    let content = default_profile(iso_name, &family);
     fs::write(&path, content).map_err(|error| error.to_string())?;
     Ok(Some(path))
 }
@@ -70,7 +71,7 @@ pub fn load_profiles_for_images(
 ) -> Result<Vec<IsoProfile>, String> {
     let mut profiles = Vec::new();
     for image in images {
-        if image.family != IsoFamily::UbuntuCasper {
+        if !is_supported_profile_family(&image.family) {
             continue;
         }
         let path = profile_path(layout, &image.name);
@@ -88,11 +89,34 @@ fn profile_path(layout: &PartBootLayout, iso_name: &str) -> PathBuf {
     layout.profiles.join(format!("{stem}.profile"))
 }
 
-fn default_ubuntu_profile(iso_name: &str) -> String {
+fn default_profile(iso_name: &str, family: &IsoFamily) -> String {
+    let family_label = profile_family_name(family);
+    let preferred_mode = if matches!(family, IsoFamily::UbuntuCasper) {
+        "extracted"
+    } else {
+        "iso_toram"
+    };
     format!(
-        "name={}\nfamily=ubuntu\npreferred_mode=extracted\nfallback_mode=iso_toram\nvisible_fallback=true\n",
-        iso_name
+        "name={}\nfamily={}\npreferred_mode={}\nfallback_mode=iso_toram\nvisible_fallback=true\n",
+        iso_name, family_label, preferred_mode
     )
+}
+
+fn is_supported_profile_family(family: &IsoFamily) -> bool {
+    matches!(
+        family,
+        IsoFamily::UbuntuCasper | IsoFamily::DebianLive | IsoFamily::Arch | IsoFamily::Fedora
+    )
+}
+
+fn profile_family_name(family: &IsoFamily) -> &'static str {
+    match family {
+        IsoFamily::UbuntuCasper => "ubuntu",
+        IsoFamily::DebianLive => "debian",
+        IsoFamily::Arch => "arch",
+        IsoFamily::Fedora => "fedora",
+        IsoFamily::Windows | IsoFamily::Unknown => "unknown",
+    }
 }
 
 fn parse_profile(content: &str, path: &PathBuf) -> Result<IsoProfile, String> {
@@ -111,6 +135,9 @@ fn parse_profile(content: &str, path: &PathBuf) -> Result<IsoProfile, String> {
     let name = required_value(&values, "name", path)?;
     let family = match required_value(&values, "family", path)?.as_str() {
         "ubuntu" => IsoFamily::UbuntuCasper,
+        "debian" => IsoFamily::DebianLive,
+        "arch" => IsoFamily::Arch,
+        "fedora" => IsoFamily::Fedora,
         value => {
             return Err(format!(
                 "unsupported profile family '{value}' in {}",

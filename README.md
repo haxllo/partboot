@@ -85,11 +85,11 @@ firmware boot path. Use this before adding any persistent boot entry.
 `EFI\Boot\bootx64.efi`. Use this when firmware does not provide a file browser;
 after installing it, reboot and choose the UEFI entry for that disk/partition.
 
-`extract` uses `7z` to extract Ubuntu Casper files from an ISO. When a complete
-extracted Casper directory exists, `generate-menu` emits an extracted boot entry
-and an ISO RAM fallback entry. PartBoot also creates per-ISO profile files in
-`partboot/profiles` for Ubuntu images and uses them to decide preferred/fallback
-menu behavior.
+`extract` uses `7z` to extract Linux boot files from an ISO. When complete
+extracted files exist (`vmlinuz` + `initrd`), `generate-menu` can use extracted
+mode where supported and keeps ISO boot fallback entries. PartBoot also creates
+per-ISO profile files in `partboot/profiles` for supported Linux families
+(Ubuntu, Debian/Kali, Arch, Fedora).
 If `7z` is not in PATH, set `PARTBOOT_7Z_PATH` to the 7z executable location.
 
 The generated GRUB menu keeps entry labels minimal: each main entry uses only
@@ -113,6 +113,8 @@ cargo run -- start
 `start` auto-imports ISO files from the selected drive root (for example
 `H:\ubuntu.iso`) into `H:\partboot\isos\` when `partboot\isos` is empty. It
 tries move-first (same drive) to avoid requiring double disk space.
+`start` now attempts extraction for the first supported Linux ISO family
+(Ubuntu, Debian/Kali, Arch, Fedora) instead of Ubuntu-only.
 `start` now also auto-populates `H:\partboot\cache` from bundled EFI assets
 (`assets\efi`) when cache binaries are missing, after checksum verification.
 If bundled assets are unavailable, PartBoot attempts a fallback download from

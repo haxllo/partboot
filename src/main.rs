@@ -4,7 +4,9 @@ mod iso;
 mod layout;
 mod profile;
 
-use crate::extract::{extract_casper, mark_extracted_images};
+use crate::extract::{
+    extract_casper, is_complete_extracted, is_supported_linux_family, mark_extracted_images,
+};
 use crate::grub::generate_grub_cfg;
 use crate::iso::{scan_iso_dir, support_label};
 use crate::layout::PartBootLayout;
@@ -203,7 +205,7 @@ fn run(command: Command) -> Result<(), String> {
                 println!("created profile {}", path.display());
             }
             println!(
-                "extracted Ubuntu Casper files to {}",
+                "extracted Linux boot files to {}",
                 layout.extracted.join(extracted_id).display()
             );
         }
@@ -490,27 +492,36 @@ fn run_guided_test_flow(
     } else {
         images
             .iter()
-            .find(|image| matches!(image.family, crate::iso::IsoFamily::UbuntuCasper))
+            .find(|image| is_supported_linux_family(&image.family))
             .map(|image| image.name.clone())
     };
 
-    let extracted_target = if let Some(iso_name) = selected_iso {
+    let mut extracted_target = None;
+    if let Some(iso_name) = selected_iso {
         let extract_label = format!("extract {}", iso_name);
-        run_with_spinner(!json, &extract_label, || {
+        let extraction_result = run_with_spinner(!json, &extract_label, || {
             extract_casper(&layout, &iso_name)?;
             ensure_profile_for_iso_name(&layout, &iso_name)?;
             Ok(())
-        })?;
-        if !json {
-            println!("[ok] extracted {}", iso_name);
+        });
+        match extraction_result {
+            Ok(()) => {
+                if !json {
+                    println!("[ok] extracted {}", iso_name);
+                }
+                extracted_target = Some(iso_name);
+            }
+            Err(error) => {
+                if !json {
+                    println!("[warn] extract step skipped for {}: {}", iso_name, error);
+                }
+            }
         }
-        Some(iso_name)
     } else {
         if !json {
-            println!("[warn] no Ubuntu ISO found; skipping extract step");
+            println!("[warn] no supported Linux ISO found; skipping extract step");
         }
-        None
-    };
+    }
 
     images = scan_iso_dir(&layout.isos).map_err(|error| error.to_string())?;
     mark_extracted_images(&layout, &mut images);
@@ -1269,27 +1280,24 @@ fn doctor_ntfs_uuid_status(layout: &PartBootLayout) -> String {
 
 fn doctor_extracted_status(layout: &PartBootLayout) -> Result<String, String> {
     let images = scan_iso_dir(&layout.isos).map_err(|error| error.to_string())?;
-    let ubuntu_images: Vec<_> = images
+    let linux_images: Vec<_> = images
         .into_iter()
-        .filter(|image| matches!(image.family, crate::iso::IsoFamily::UbuntuCasper))
+        .filter(|image| is_supported_linux_family(&image.family))
         .collect();
-    if ubuntu_images.is_empty() {
-        return Ok("n/a (no Ubuntu ISO found)".to_string());
+    if linux_images.is_empty() {
+        return Ok("n/a (no supported Linux ISO found)".to_string());
     }
 
-    let complete = ubuntu_images
+    let complete = linux_images
         .iter()
         .filter(|image| {
-            crate::extract::is_complete_extracted_casper(
-                layout,
-                &crate::extract::extracted_id_from_iso_name(&image.name),
-            )
+            is_complete_extracted(layout, &crate::extract::extracted_id_from_iso_name(&image.name))
         })
         .count();
-    if complete == ubuntu_images.len() {
+    if complete == linux_images.len() {
         Ok("yes".to_string())
     } else {
-        Ok(format!("no ({complete}/{})", ubuntu_images.len()))
+        Ok(format!("no ({complete}/{})", linux_images.len()))
     }
 }
 
