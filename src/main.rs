@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex, OnceLock,
 };
 use std::thread;
 use std::time::Duration;
@@ -408,6 +408,126 @@ fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|arg| arg == flag)
 }
 
+const PARTBOOT_ASCII: &str = r" ____   __   ____  ____  ____   __    __  ____ 
+(  _ \ / _\ (  _ \(_  _)(  _ \ /  \  /  \(_  _)
+ ) __//    \ )   /  )(   ) _ ((  O )(  O ) )(  
+(__)  \_/\_/(__\_) (__) (____/ \__/  \__/ (__)";
+
+#[derive(Debug, Default)]
+struct UiRuntimeState {
+    fullscreen: bool,
+    lines: Vec<String>,
+}
+
+static UI_RUNTIME: OnceLock<Mutex<UiRuntimeState>> = OnceLock::new();
+
+fn ui_runtime() -> &'static Mutex<UiRuntimeState> {
+    UI_RUNTIME.get_or_init(|| Mutex::new(UiRuntimeState::default()))
+}
+
+fn ui_is_fullscreen() -> bool {
+    ui_runtime().lock().map(|state| state.fullscreen).unwrap_or(false)
+}
+
+fn ui_emit_line(line: String) {
+    let mut state = match ui_runtime().lock() {
+        Ok(state) => state,
+        Err(_) => {
+            println!("{line}");
+            return;
+        }
+    };
+
+    if !state.fullscreen {
+        println!("{line}");
+        return;
+    }
+
+    state.lines.push(line);
+    ui_render_fullscreen_locked(&state);
+}
+
+fn ui_render_fullscreen_locked(state: &UiRuntimeState) {
+    use crossterm::cursor::MoveTo;
+    use crossterm::execute;
+    use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
+    use crossterm::terminal::{Clear, ClearType};
+
+    let mut stdout = io::stdout();
+    if execute!(
+        stdout,
+        MoveTo(0, 0),
+        Clear(ClearType::All),
+        SetForegroundColor(Color::Cyan),
+        SetAttribute(Attribute::Bold),
+        Print(format!("{PARTBOOT_ASCII}\n")),
+        SetAttribute(Attribute::Reset),
+        ResetColor,
+        Print("====================\n"),
+        SetForegroundColor(Color::DarkGrey),
+        Print("Running guided flow...\n\n"),
+        ResetColor
+    )
+    .is_err()
+    {
+        return;
+    }
+
+    // Keep only the latest lines so the footer remains visible on smaller terminals.
+    let max_lines = 26usize;
+    let start = state.lines.len().saturating_sub(max_lines);
+    for line in &state.lines[start..] {
+        let _ = execute!(stdout, Print(line), Print("\n"));
+    }
+    let _ = stdout.flush();
+}
+
+fn ui_run_fullscreen<T, F>(operation: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String>,
+{
+    use crossterm::cursor::{Hide, Show};
+    use crossterm::execute;
+    use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
+
+    struct FullscreenGuard;
+    impl Drop for FullscreenGuard {
+        fn drop(&mut self) {
+            if let Ok(mut state) = ui_runtime().lock() {
+                state.fullscreen = false;
+                state.lines.clear();
+            }
+            let _ = execute!(io::stdout(), Show, LeaveAlternateScreen);
+        }
+    }
+
+    execute!(io::stdout(), EnterAlternateScreen, Hide)
+        .map_err(|error| format!("failed to start fullscreen UI: {error}"))?;
+    if let Ok(mut state) = ui_runtime().lock() {
+        state.fullscreen = true;
+        state.lines.clear();
+    }
+    let _guard = FullscreenGuard;
+    operation()
+}
+
+fn ui_section(title: &str) {
+    ui_emit_line(String::new());
+    ui_emit_line(format!("== {title} =="));
+}
+
+fn ui_ok(message: &str) {
+    ui_emit_line(format!("[ok] {message}"));
+}
+
+fn ui_warn(message: &str) {
+    ui_emit_line(format!("[warn] {message}"));
+}
+
+fn ui_kv(label: &str, value: &str) {
+    ui_emit_line(format!("  {:<26} {}", format!("{label}:"), value));
+}
+
 fn status(path: &PathBuf) -> &'static str {
     if path.exists() {
         "present"
@@ -454,8 +574,8 @@ fn run_guided_test_flow(
     validate_partition_uuid_for_root(&layout.root, &partition_uuid)?;
 
     if !json {
-        println!("[step] init");
-        println!("[ok] initialized {}", layout.root.display());
+        ui_section("Initialize");
+        ui_ok(&format!("Initialized {}", layout.root.display()));
     }
 
     let mut images = scan_iso_dir(&layout.isos).map_err(|error| error.to_string())?;
@@ -467,12 +587,12 @@ fn run_guided_test_flow(
     if !imported_drive_isos.is_empty() {
         images = scan_iso_dir(&layout.isos).map_err(|error| error.to_string())?;
         if !json {
-            println!("[step] import");
-            println!(
-                "[ok] imported {} ISO file(s) from drive root into {}",
+            ui_section("Import");
+            ui_ok(&format!(
+                "Imported {} ISO file(s) from drive root into {}",
                 imported_drive_isos.len(),
                 layout.isos.display()
-            );
+            ));
         }
     }
     if images.is_empty() {
@@ -483,43 +603,57 @@ fn run_guided_test_flow(
     }
     let created_profiles = ensure_profiles_for_images(&layout, &images)?;
     if !json {
-        println!("[step] scan");
-        println!("[ok] found {} ISO image(s)", images.len());
+        ui_section("Scan");
+        ui_ok(&format!("Found {} ISO image(s)", images.len()));
     }
 
-    let selected_iso = if let Some(iso_name) = iso {
-        Some(iso_name)
+    if !json {
+        ui_section("Extract");
+    }
+
+    let selected_isos: Vec<String> = if let Some(iso_name) = iso {
+        vec![iso_name]
     } else {
         images
             .iter()
-            .find(|image| is_supported_linux_family(&image.family))
+            .filter(|image| is_supported_linux_family(&image.family))
             .map(|image| image.name.clone())
+            .collect()
     };
 
-    let mut extracted_target = None;
-    if let Some(iso_name) = selected_iso {
-        let extract_label = format!("extract {}", iso_name);
-        let extraction_result = run_with_spinner(!json, &extract_label, || {
-            extract_casper(&layout, &iso_name)?;
-            ensure_profile_for_iso_name(&layout, &iso_name)?;
-            Ok(())
-        });
-        match extraction_result {
-            Ok(()) => {
-                if !json {
-                    println!("[ok] extracted {}", iso_name);
+    let mut extracted_targets = Vec::new();
+    let mut extract_failures = Vec::new();
+    if selected_isos.is_empty() {
+        if !json {
+            ui_warn("No supported Linux ISO found; skipping extract step");
+        }
+    } else {
+        for iso_name in &selected_isos {
+            let extract_label = format!("extract {}", iso_name);
+            let extraction_result = run_with_spinner(!json && !ui_is_fullscreen(), &extract_label, || {
+                extract_casper(&layout, iso_name)?;
+                ensure_profile_for_iso_name(&layout, iso_name)?;
+                Ok(())
+            });
+            match extraction_result {
+                Ok(()) => {
+                    if !json {
+                        ui_ok(&format!("Extracted {}", iso_name));
+                    }
+                    extracted_targets.push(iso_name.clone());
                 }
-                extracted_target = Some(iso_name);
-            }
-            Err(error) => {
-                if !json {
-                    println!("[warn] extract step skipped for {}: {}", iso_name, error);
+                Err(error) => {
+                    if !json {
+                        ui_warn(&format!("Extract step skipped for {}: {}", iso_name, error));
+                    }
+                    extract_failures.push(iso_name.clone());
                 }
             }
         }
-    } else {
         if !json {
-            println!("[warn] no supported Linux ISO found; skipping extract step");
+            ui_kv("Extraction requested", &selected_isos.len().to_string());
+            ui_kv("Extraction succeeded", &extracted_targets.len().to_string());
+            ui_kv("Extraction skipped", &extract_failures.len().to_string());
         }
     }
 
@@ -527,7 +661,7 @@ fn run_guided_test_flow(
     mark_extracted_images(&layout, &mut images);
     let profiles = load_profiles_for_images(&layout, &images)?;
     let generated_cfg = layout.grub_cfg_path();
-    run_with_spinner(!json, "generate-menu", || {
+    run_with_spinner(!json && !ui_is_fullscreen(), "generate-menu", || {
         let cfg = generate_grub_cfg(
             &images,
             &partition_uuid,
@@ -542,16 +676,13 @@ fn run_guided_test_flow(
         Ok(())
     })?;
     if !json {
-        println!("[ok] wrote {}", generated_cfg.display());
+        ui_ok(&format!("Wrote {}", generated_cfg.display()));
     }
 
     let efi_binaries = resolve_efi_binaries_for_stage(&layout)?;
     if !json && efi_binaries.copied_from_bundle {
-        println!("[step] cache");
-        println!(
-            "[ok] populated cache binaries from {}",
-            efi_binaries.source
-        );
+        ui_section("Cache");
+        ui_ok(&format!("Populated cache binaries from {}", efi_binaries.source));
     }
     let staged = stage_efi(
         &layout,
@@ -560,18 +691,18 @@ fn run_guided_test_flow(
         None,
     )?;
     if !json {
-        println!("[step] stage-efi");
-        println!("[ok] staged {}", staged.display());
+        ui_section("Stage EFI");
+        ui_ok(&format!("Staged {}", staged.display()));
     }
 
     install_esp(&layout, &esp, dry_run_install, !dry_run_install)?;
     install_fallback(&layout, &esp, dry_run_install, !dry_run_install)?;
     if !json {
-        println!("[step] install");
+        ui_section("Install");
         if dry_run_install {
-            println!("[ok] install steps executed in dry-run mode");
+            ui_ok("Install steps executed in dry-run mode");
         } else {
-            println!("[ok] installed to {}", esp.display());
+            ui_ok(&format!("Installed to {}", esp.display()));
         }
     }
 
@@ -587,7 +718,7 @@ fn run_guided_test_flow(
             .map(|path| format!("\"{}\"", json_escape(&path.to_string_lossy())))
             .collect();
         println!(
-            "{{\"root\":\"{}\",\"esp\":\"{}\",\"partition_uuid\":\"{}\",\"partition_label\":\"{}\",\"image_count\":{},\"imported_drive_root_isos\":{},\"created_profiles\":[{}],\"extracted_iso\":\"{}\",\"generated_cfg\":\"{}\",\"staged_dir\":\"{}\",\"efi_binary_source\":\"{}\",\"dry_run_install\":{},\"doctor\":{{\"full_ntfs_uuid_present\":\"{}\",\"extracted_files_complete\":\"{}\",\"profiles_present\":\"{}\",\"esp_files_installed\":\"{}\",\"fallback_installed\":\"{}\"}}}}",
+            "{{\"root\":\"{}\",\"esp\":\"{}\",\"partition_uuid\":\"{}\",\"partition_label\":\"{}\",\"image_count\":{},\"imported_drive_root_isos\":{},\"created_profiles\":[{}],\"extracted_iso\":\"{}\",\"extracted_isos\":[{}],\"generated_cfg\":\"{}\",\"staged_dir\":\"{}\",\"efi_binary_source\":\"{}\",\"dry_run_install\":{},\"doctor\":{{\"full_ntfs_uuid_present\":\"{}\",\"extracted_files_complete\":\"{}\",\"profiles_present\":\"{}\",\"esp_files_installed\":\"{}\",\"fallback_installed\":\"{}\"}}}}",
             json_escape(&layout.root.to_string_lossy()),
             json_escape(&esp.to_string_lossy()),
             json_escape(&partition_uuid),
@@ -595,7 +726,12 @@ fn run_guided_test_flow(
             images.len(),
             imported_drive_isos.len(),
             created_items.join(","),
-            json_escape(extracted_target.as_deref().unwrap_or("")),
+            json_escape(extracted_targets.first().map(String::as_str).unwrap_or("")),
+            extracted_targets
+                .iter()
+                .map(|name| format!("\"{}\"", json_escape(name)))
+                .collect::<Vec<_>>()
+                .join(","),
             json_escape(&generated_cfg.to_string_lossy()),
             json_escape(&staged.to_string_lossy()),
             json_escape(&efi_binaries.source),
@@ -607,12 +743,27 @@ fn run_guided_test_flow(
             json_escape(&fallback_status)
         );
     } else {
-        println!("[step] doctor");
-        println!("[ok] full NTFS UUID present: {}", ntfs_uuid_status);
-        println!("[ok] extracted files complete: {}", extracted_status);
-        println!("[ok] profiles present: {}", profiles_status);
-        println!("[ok] ESP files installed: {}", esp_status);
-        println!("[ok] fallback installed: {}", fallback_status);
+        ui_section("Health Check");
+        ui_kv("Full NTFS UUID present", &ntfs_uuid_status);
+        ui_kv("Extracted files complete", &extracted_status);
+        ui_kv("Profiles present", &profiles_status);
+        ui_kv("ESP files installed", &esp_status);
+        ui_kv("Fallback installed", &fallback_status);
+        ui_section("Summary");
+        ui_kv("Root", &layout.root.display().to_string());
+        ui_kv("ESP", &esp.display().to_string());
+        ui_kv("ISO count", &images.len().to_string());
+        let extracted_iso_summary = if extracted_targets.is_empty() {
+            "(none)".to_string()
+        } else {
+            extracted_targets.join(", ")
+        };
+        ui_kv(
+            "Extracted ISO(s)",
+            &extracted_iso_summary,
+        );
+        ui_kv("Generated config", &generated_cfg.display().to_string());
+        ui_kv("Staged EFI dir", &staged.display().to_string());
     }
 
     Ok(())
@@ -711,6 +862,7 @@ where
 
     let clear_width = label_owned.len() + 16;
     let _ = write!(io::stdout(), "\r{}\r", " ".repeat(clear_width));
+    let _ = writeln!(io::stdout());
     let _ = io::stdout().flush();
 
     result
@@ -1061,91 +1213,222 @@ fn run_guided_test_flow_interactive(
             return Err("no FAT32 partitions detected for ESP selection".to_string());
         }
 
-        println!("[interactive] Select NTFS partition for PartBoot root:");
-        let root_choice = choose_volume(&root_candidates)?;
-        println!("[interactive] Select FAT32 partition for ESP:");
-        let esp_choice = choose_volume(&esp_candidates)?;
+        ui_run_fullscreen(move || {
+            let root_choice = choose_volume_tui(
+                "Select NTFS partition for PartBoot root",
+                "Use Up/Down arrows (or j/k), Enter confirms",
+                &root_candidates,
+            )?;
+            let esp_choice = choose_volume_tui(
+                "Select FAT32 partition for ESP",
+                "Use Up/Down arrows (or j/k), Enter confirms",
+                &esp_candidates,
+            )?;
 
-        let root = PathBuf::from(format!("{}\\partboot", root_choice.drive));
-        let esp = PathBuf::from(format!("{}\\", esp_choice.drive));
+            ui_section("Preparing");
+            ui_ok("Selections confirmed");
+            ui_kv("Selected root drive", &root_choice.drive);
+            ui_kv("Selected ESP drive", &esp_choice.drive);
+            ui_ok("Detecting partition UUID...");
 
-        let partition_uuid = detect_partition_uuid(&root_choice.drive)?;
-        let auto_label = root_choice.label.unwrap_or_default();
-        let partition_label = prompt_partition_label(&auto_label)?;
+            let root = PathBuf::from(format!("{}\\partboot", root_choice.drive));
+            let esp = PathBuf::from(format!("{}\\", esp_choice.drive));
+            let partition_uuid = detect_partition_uuid(&root_choice.drive)?;
+            let partition_label = root_choice.label.clone();
+            ui_ok("Partition UUID detected");
 
-        println!("[interactive] detected root: {}", root.display());
-        println!("[interactive] detected esp: {}", esp.display());
-        println!("[interactive] detected partition uuid: {}", partition_uuid);
-        println!(
-            "[interactive] using partition label: {}",
-            partition_label.as_deref().unwrap_or("(none)")
-        );
+            ui_section("Selected configuration");
+            ui_kv("Root", &root.display().to_string());
+            ui_kv("ESP", &esp.display().to_string());
+            ui_kv("Partition UUID", &partition_uuid);
+            ui_kv(
+                "Partition label",
+                partition_label.as_deref().unwrap_or("(none)"),
+            );
+            ui_kv(
+                "Install mode",
+                if dry_run_install { "dry-run" } else { "write changes" },
+            );
 
-        run_guided_test_flow(
-            root,
-            esp,
-            partition_uuid,
-            partition_label,
-            None,
-            include_diagnostics,
-            false,
-            dry_run_install,
-        )
+            if !confirm_run_plan(dry_run_install)? {
+                ui_warn("Cancelled before execution.");
+                return Ok(());
+            }
+
+            let result = run_guided_test_flow(
+                root,
+                esp,
+                partition_uuid,
+                partition_label,
+                None,
+                include_diagnostics,
+                false,
+                dry_run_install,
+            );
+            wait_for_exit_acknowledgement()?;
+            result
+        })
     }
 }
 
-fn choose_volume(volumes: &[WindowsVolume]) -> Result<WindowsVolume, String> {
-    for (index, volume) in volumes.iter().enumerate() {
-        let label = volume.label.as_deref().unwrap_or("(no-label)");
-        println!(
-            "  {}. {} | {} | {}",
-            index + 1,
-            volume.drive,
-            volume.filesystem,
-            label
-        );
-    }
+#[cfg(windows)]
+fn choose_volume_tui(
+    title: &str,
+    hint: &str,
+    volumes: &[WindowsVolume],
+) -> Result<WindowsVolume, String> {
+    use crossterm::cursor::{Hide, MoveTo, Show};
+    use crossterm::event::{read, Event, KeyCode, KeyEventKind};
+    use crossterm::execute;
+    use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 
-    print!("Select number: ");
-    io::stdout().flush().map_err(|error| error.to_string())?;
-    let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .map_err(|error| error.to_string())?;
-    let choice = input
-        .trim()
-        .parse::<usize>()
-        .map_err(|_| "invalid selection; expected a number".to_string())?;
-    if choice == 0 || choice > volumes.len() {
-        return Err("selection out of range".to_string());
+    struct TuiGuard {
+        owns_terminal: bool,
     }
-    Ok(volumes[choice - 1].clone())
-}
-
-fn prompt_partition_label(detected: &str) -> Result<Option<String>, String> {
-    if detected.is_empty() {
-        print!("Partition label not detected. Enter label (optional): ");
-    } else {
-        print!(
-            "Detected partition label '{}' (press Enter to accept, or type a new label): ",
-            detected
-        );
-    }
-    io::stdout().flush().map_err(|error| error.to_string())?;
-    let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .map_err(|error| error.to_string())?;
-    let entered = input.trim();
-    if entered.is_empty() {
-        if detected.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(detected.to_string()))
+    impl Drop for TuiGuard {
+        fn drop(&mut self) {
+            let _ = disable_raw_mode();
+            if self.owns_terminal {
+                let _ = execute!(io::stdout(), Show, LeaveAlternateScreen);
+            }
         }
-    } else {
-        Ok(Some(entered.to_string()))
     }
+
+    if volumes.is_empty() {
+        return Err("no volumes available for selection".to_string());
+    }
+
+    let owns_terminal = !ui_is_fullscreen();
+    enable_raw_mode().map_err(|error| format!("failed to enable raw mode: {error}"))?;
+    if owns_terminal {
+        execute!(io::stdout(), EnterAlternateScreen, Hide)
+            .map_err(|error| format!("failed to initialize terminal UI: {error}"))?;
+    }
+    let _guard = TuiGuard { owns_terminal };
+
+    let mut selected = 0usize;
+    loop {
+        execute!(
+            io::stdout(),
+            MoveTo(0, 0),
+            Clear(ClearType::All),
+            SetForegroundColor(Color::Cyan),
+            SetAttribute(Attribute::Bold),
+            Print(format!("{PARTBOOT_ASCII}\n")),
+            SetAttribute(Attribute::Reset),
+            ResetColor,
+            Print("====================\n"),
+            Print(format!("{title}\n")),
+            SetForegroundColor(Color::DarkGrey),
+            Print(format!("{hint}\n\n")),
+            ResetColor
+        )
+        .map_err(|error| format!("failed to draw terminal UI: {error}"))?;
+
+        for (index, volume) in volumes.iter().enumerate() {
+            let label = volume.label.as_deref().unwrap_or("(no-label)");
+            if index == selected {
+                execute!(
+                    io::stdout(),
+                    SetForegroundColor(Color::Green),
+                    SetAttribute(Attribute::Bold),
+                    Print(format!(
+                        "> {:<4} {:<6} {}\n",
+                        volume.drive, volume.filesystem, label
+                    )),
+                    SetAttribute(Attribute::Reset),
+                    ResetColor
+                )
+                .map_err(|error| format!("failed to draw selection row: {error}"))?;
+            } else {
+                execute!(
+                    io::stdout(),
+                    Print(format!(
+                        "  {:<4} {:<6} {}\n",
+                        volume.drive, volume.filesystem, label
+                    ))
+                )
+                .map_err(|error| format!("failed to draw row: {error}"))?;
+            }
+        }
+
+        let current = &volumes[selected];
+        let current_label = current.label.as_deref().unwrap_or("(no-label)");
+        execute!(
+            io::stdout(),
+            Print("\n"),
+            SetForegroundColor(Color::DarkGrey),
+            Print("Selected\n"),
+            ResetColor,
+            Print(format!("  Drive:      {}\n", current.drive)),
+            Print(format!("  Filesystem: {}\n", current.filesystem)),
+            Print(format!("  Label:      {}\n", current_label)),
+            Print("\n"),
+            SetForegroundColor(Color::DarkGrey),
+            Print("Controls: Up/Down or j/k, Enter confirm, q/Esc cancel\n"),
+            ResetColor
+        )
+        .map_err(|error| format!("failed to draw footer: {error}"))?;
+        io::stdout().flush().map_err(|error| error.to_string())?;
+
+        match read().map_err(|error| format!("failed reading key: {error}"))? {
+            Event::Key(key_event) => {
+                if key_event.kind != KeyEventKind::Press {
+                    continue;
+                }
+                match key_event.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    selected = if selected == 0 {
+                        volumes.len() - 1
+                    } else {
+                        selected - 1
+                    };
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    selected = (selected + 1) % volumes.len();
+                }
+                KeyCode::Enter => return Ok(volumes[selected].clone()),
+                KeyCode::Esc | KeyCode::Char('q') => return Err("selection cancelled".to_string()),
+                KeyCode::Char(ch) if ch.is_ascii_digit() => {
+                    if let Some(digit) = ch.to_digit(10) {
+                        let index = digit as usize;
+                        if index >= 1 && index <= volumes.len() {
+                            selected = index - 1;
+                        }
+                    }
+                }
+                _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn confirm_run_plan(dry_run_install: bool) -> Result<bool, String> {
+    if dry_run_install {
+        print!("Proceed with dry-run execution? [y/N]: ");
+    } else {
+        print!("Proceed with write/install actions on selected drives? [y/N]: ");
+    }
+    io::stdout().flush().map_err(|error| error.to_string())?;
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|error| error.to_string())?;
+    let entered = input.trim().to_ascii_lowercase();
+    Ok(matches!(entered.as_str(), "y" | "yes"))
+}
+
+fn wait_for_exit_acknowledgement() -> Result<(), String> {
+    print!("Press Enter to exit...");
+    io::stdout().flush().map_err(|error| error.to_string())?;
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn detect_partition_uuid(drive: &str) -> Result<String, String> {
@@ -1362,14 +1645,14 @@ fn install_esp(
     validate_esp_filesystem(esp)?;
 
     let destination = esp.join("EFI").join("PartBoot");
-    println!("source: {}", staged.display());
-    println!("destination: {}", destination.display());
+    ui_kv("Source", &staged.display().to_string());
+    ui_kv("Destination", &destination.display().to_string());
 
     if dry_run {
-        println!("dry-run: would create {}", destination.display());
-        println!("dry-run: would copy grubx64.efi");
-        println!("dry-run: would copy grub.cfg");
-        println!("dry-run: no files changed");
+        ui_kv("Dry-run", &format!("would create {}", destination.display()));
+        ui_kv("Dry-run", "would copy grubx64.efi");
+        ui_kv("Dry-run", "would copy grub.cfg");
+        ui_kv("Dry-run", "no files changed");
         return Ok(());
     }
 
@@ -1385,8 +1668,8 @@ fn install_esp(
         "PartBoot EFI files.\r\nThis directory was created by partboot install-esp.\r\n",
     )
     .map_err(|error| error.to_string())?;
-    println!("installed EFI files in {}", destination.display());
-    println!("firmware boot entries were not modified");
+    ui_ok(&format!("Installed EFI files in {}", destination.display()));
+    ui_kv("Firmware entries", "not modified");
     Ok(())
 }
 
@@ -1421,8 +1704,8 @@ fn install_fallback(
 
     let destination = esp.join("EFI").join("Boot");
     let destination_boot = destination.join("bootx64.efi");
-    println!("source: {}", staged.display());
-    println!("fallback destination: {}", destination.display());
+    ui_kv("Source", &staged.display().to_string());
+    ui_kv("Fallback destination", &destination.display().to_string());
 
     if destination_boot.exists() && !dry_run && !force {
         return Err(format!(
@@ -1432,11 +1715,11 @@ fn install_fallback(
     }
 
     if dry_run {
-        println!("dry-run: would create {}", destination.display());
-        println!("dry-run: would copy bootx64.efi");
-        println!("dry-run: would copy grubx64.efi");
-        println!("dry-run: would copy grub.cfg");
-        println!("dry-run: no files changed");
+        ui_kv("Dry-run", &format!("would create {}", destination.display()));
+        ui_kv("Dry-run", "would copy bootx64.efi");
+        ui_kv("Dry-run", "would copy grubx64.efi");
+        ui_kv("Dry-run", "would copy grub.cfg");
+        ui_kv("Dry-run", "no files changed");
         return Ok(());
     }
 
@@ -1449,8 +1732,11 @@ fn install_fallback(
         "PartBoot UEFI fallback files.\r\nCreated by partboot install-fallback.\r\n",
     )
     .map_err(|error| error.to_string())?;
-    println!("installed fallback EFI files in {}", destination.display());
-    println!("next: reboot and choose the UEFI entry for this disk/partition");
+    ui_ok(&format!(
+        "Installed fallback EFI files in {}",
+        destination.display()
+    ));
+    ui_kv("Next", "reboot and choose the UEFI entry for this disk/partition");
     Ok(())
 }
 

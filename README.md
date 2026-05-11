@@ -113,7 +113,9 @@ cargo run -- start
 `start` auto-imports ISO files from the selected drive root (for example
 `H:\ubuntu.iso`) into `H:\partboot\isos\` when `partboot\isos` is empty. It
 tries move-first (same drive) to avoid requiring double disk space.
-`start` now attempts extraction for the first supported Linux ISO family
+`start` now uses a TUI-style wizard for partition selection (navigable with
+Up/Down arrows or `j`/`k`, number jump, Enter confirm).
+`start` now attempts extraction for supported Linux ISOs
 (Ubuntu, Debian/Kali, Arch, Fedora) instead of Ubuntu-only.
 `start` now also auto-populates `H:\partboot\cache` from bundled EFI assets
 (`assets\efi`) when cache binaries are missing, after checksum verification.

@@ -1,6 +1,6 @@
 [package]
 name = "partboot"
-version = "0.1.5"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
@@ -12,3 +12,4 @@ categories = ["command-line-utilities"]
 exclude = ["dist/**", "target/**"]
 
 [dependencies]
+crossterm = "0.28"
