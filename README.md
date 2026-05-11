@@ -148,6 +148,12 @@ Local-only bypass options (not for release):
 powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Target x86_64-pc-windows-gnu -SkipStandaloneGrubBuild -SkipProvenanceCheck
 ```
 
+Before or after publishing a GitHub release, verify required assets are present:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\check-release-assets.ps1 -Tag <RELEASE_TAG>
+```
+
 See `docs/release-efi-provenance.md` for required provenance notes per release.
 
 Safe step-by-step path:
