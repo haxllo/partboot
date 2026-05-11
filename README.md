@@ -115,7 +115,11 @@ cargo run -- start
 tries move-first (same drive) to avoid requiring double disk space.
 `start` now also auto-populates `H:\partboot\cache` from bundled EFI assets
 (`assets\efi`) when cache binaries are missing, after checksum verification.
+If bundled assets are unavailable, PartBoot attempts a fallback download from
+GitHub Releases (`v<app-version>`) and verifies checksums before caching.
 Override asset location with `PARTBOOT_EFI_ASSETS`.
+Override release source with `PARTBOOT_EFI_RELEASE_BASE` and
+`PARTBOOT_EFI_RELEASE_TAG`.
 
 ## Release packaging
 

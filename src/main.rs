@@ -725,36 +725,29 @@ fn resolve_efi_binaries_for_stage(layout: &PartBootLayout) -> Result<EfiBinaryPa
         });
     }
 
-    let bundled_dir = locate_bundled_efi_dir()
-        .ok_or_else(|| {
-            format!(
-                "missing staged binaries in {} and no bundled EFI assets found. Expected grubx64.efi and bootx64.efi in cache, or packaged assets under assets\\efi",
-                layout.cache.display()
-            )
-        })?;
-    verify_bundled_efi_checksums(&bundled_dir)?;
-    fs::create_dir_all(&layout.cache).map_err(|error| error.to_string())?;
-    fs::copy(bundled_dir.join("grubx64.efi"), &cache_grub).map_err(|error| {
-        format!(
-            "failed to copy bundled grubx64.efi into {}: {}",
-            cache_grub.display(),
-            error
-        )
-    })?;
-    fs::copy(bundled_dir.join("bootx64.efi"), &cache_boot).map_err(|error| {
-        format!(
-            "failed to copy bundled bootx64.efi into {}: {}",
-            cache_boot.display(),
-            error
-        )
-    })?;
+    if let Some(bundled_dir) = locate_bundled_efi_dir() {
+        return populate_cache_from_verified_assets(layout, &bundled_dir, &cache_grub, &cache_boot);
+    }
 
-    Ok(EfiBinaryPaths {
-        grub_x64: cache_grub,
-        boot_x64: cache_boot,
-        source: bundled_dir.display().to_string(),
-        copied_from_bundle: true,
-    })
+    if let Some(downloaded) = download_release_efi_assets(layout)? {
+        return populate_cache_from_verified_assets(
+            layout,
+            &downloaded.dir,
+            &cache_grub,
+            &cache_boot,
+        )
+        .map(|paths| EfiBinaryPaths {
+            source: downloaded.source,
+            copied_from_bundle: paths.copied_from_bundle,
+            grub_x64: paths.grub_x64,
+            boot_x64: paths.boot_x64,
+        });
+    }
+
+    Err(format!(
+        "missing staged binaries in {} and no bundled EFI assets found. Expected grubx64.efi and bootx64.efi in cache, packaged assets under assets\\efi, or GitHub release fallback assets",
+        layout.cache.display()
+    ))
 }
 
 fn locate_bundled_efi_dir() -> Option<PathBuf> {
@@ -788,6 +781,120 @@ fn locate_bundled_efi_dir() -> Option<PathBuf> {
 
 fn has_required_efi_files(dir: &Path) -> bool {
     dir.join("grubx64.efi").exists() && dir.join("bootx64.efi").exists()
+}
+
+fn populate_cache_from_verified_assets(
+    layout: &PartBootLayout,
+    source_dir: &Path,
+    cache_grub: &PathBuf,
+    cache_boot: &PathBuf,
+) -> Result<EfiBinaryPaths, String> {
+    verify_bundled_efi_checksums(source_dir)?;
+    fs::create_dir_all(&layout.cache).map_err(|error| error.to_string())?;
+    fs::copy(source_dir.join("grubx64.efi"), cache_grub).map_err(|error| {
+        format!(
+            "failed to copy grubx64.efi into {}: {}",
+            cache_grub.display(),
+            error
+        )
+    })?;
+    fs::copy(source_dir.join("bootx64.efi"), cache_boot).map_err(|error| {
+        format!(
+            "failed to copy bootx64.efi into {}: {}",
+            cache_boot.display(),
+            error
+        )
+    })?;
+
+    Ok(EfiBinaryPaths {
+        grub_x64: cache_grub.clone(),
+        boot_x64: cache_boot.clone(),
+        source: source_dir.display().to_string(),
+        copied_from_bundle: true,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DownloadedEfiAssets {
+    dir: PathBuf,
+    source: String,
+}
+
+fn download_release_efi_assets(layout: &PartBootLayout) -> Result<Option<DownloadedEfiAssets>, String> {
+    #[cfg(not(windows))]
+    {
+        let _ = layout;
+        Ok(None)
+    }
+
+    #[cfg(windows)]
+    {
+        let base = env::var("PARTBOOT_EFI_RELEASE_BASE")
+            .unwrap_or_else(|_| "https://github.com/haxllo/partboot/releases/download".to_string());
+        let base = base.trim().trim_end_matches('/').to_string();
+        if base.is_empty() {
+            return Err("PARTBOOT_EFI_RELEASE_BASE is set but empty".to_string());
+        }
+        let tag = env::var("PARTBOOT_EFI_RELEASE_TAG")
+            .unwrap_or_else(|_| format!("v{}", env!("CARGO_PKG_VERSION")));
+        let tag = tag.trim().to_string();
+        if tag.is_empty() {
+            return Err("PARTBOOT_EFI_RELEASE_TAG is set but empty".to_string());
+        }
+        let source = format!("{base}/{tag}");
+        let download_dir = layout.cache.join("_release_fallback");
+        fs::create_dir_all(&download_dir).map_err(|error| {
+            format!(
+                "failed to create release fallback directory {}: {}",
+                download_dir.display(),
+                error
+            )
+        })?;
+
+        for file in ["grubx64.efi", "bootx64.efi", "checksums.txt"] {
+            let url = format!("{source}/{file}");
+            let destination = download_dir.join(file);
+            download_file_powershell(&url, &destination).map_err(|error| {
+                format!(
+                    "{}; set PARTBOOT_EFI_RELEASE_BASE and PARTBOOT_EFI_RELEASE_TAG to override source",
+                    error
+                )
+            })?;
+        }
+
+        Ok(Some(DownloadedEfiAssets {
+            dir: download_dir,
+            source,
+        }))
+    }
+}
+
+#[cfg(windows)]
+fn download_file_powershell(url: &str, destination: &Path) -> Result<(), String> {
+    let escaped_url = url.replace('\'', "''");
+    let escaped_path = destination.to_string_lossy().replace('\'', "''");
+    let script = format!(
+        "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing -Uri '{}' -OutFile '{}'",
+        escaped_url, escaped_path
+    );
+    let output = process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+        .map_err(|error| format!("failed to invoke PowerShell for {}: {}", url, error))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let details = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            "unknown download failure".to_string()
+        };
+        Err(format!("failed downloading {}: {}", url, details))
+    }
 }
 
 fn verify_bundled_efi_checksums(dir: &Path) -> Result<(), String> {
