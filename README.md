@@ -158,6 +158,20 @@ Before or after publishing a GitHub release, verify required assets are present:
 powershell -ExecutionPolicy Bypass -File .\scripts\check-release-assets.ps1 -Tag <RELEASE_TAG>
 ```
 
+### Winget submission automation
+
+`winget-submit` workflow (`.github/workflows/winget-submit.yml`) opens a PR to
+`microsoft/winget-pkgs` after a **stable** GitHub release is published.
+
+- Skips prereleases.
+- Skips stale tags (only the latest stable release is submitted).
+- Supports manual backfill via workflow dispatch input (`tag`, optional `force`).
+
+Required repo secret:
+
+- `WINGET_TOKEN`: GitHub token with permissions needed by `wingetcreate --submit`
+  to open/update Winget PRs.
+
 See `docs/release-efi-provenance.md` for required provenance notes per release.
 
 Safe step-by-step path:
