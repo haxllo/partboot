@@ -1,5 +1,7 @@
+use crate::cache;
 use crate::iso::{IsoFamily, IsoImage};
 use crate::layout::PartBootLayout;
+use crate::spinner::Spinner;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -292,56 +294,96 @@ pub fn extract_casper(layout: &PartBootLayout, iso_arg: &str) -> Result<String, 
         .ok_or_else(|| format!("invalid ISO path: {}", iso_path.display()))?;
     let extracted_id = extracted_id_from_iso_name(iso_name);
     let destination = casper_dir(layout, &extracted_id);
+
+    // Check cache first - if we've already extracted this ISO, skip re-extraction
+    if let Ok(Some(_cached)) = cache::load_from_cache(&iso_path) {
+        if is_complete_extracted(layout, &extracted_id) {
+            return Ok(extracted_id);
+        }
+    }
+
     fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
 
+    let spinner = Spinner::new(&format!("Extracting {}...", iso_name));
     let mut missing = Vec::new();
 
-    let v_ok = try_extract_candidates(&iso_path, &VMLINUZ_CANDIDATES, &destination, "vmlinuz")
-        .map_err(|e| e.to_string())?;
-    if !v_ok {
-        missing.push(format!("vmlinuz (tried: {})", VMLINUZ_CANDIDATES.join(", ")));
+    // Extract vmlinuz
+    match try_extract_candidates(&iso_path, &VMLINUZ_CANDIDATES, &destination, "vmlinuz") {
+        Ok(true) => {},
+        Ok(false) => missing.push("vmlinuz"),
+        Err(e) => {
+            spinner.finish_error(&format!("extraction failed: {}", e));
+            return Err(format!("Extraction error: {}\n• Check if ISO file is corrupted", e));
+        }
     }
 
-    let i_ok = try_extract_candidates(&iso_path, &INITRD_CANDIDATES, &destination, "initrd")
-        .map_err(|e| e.to_string())?;
-    if !i_ok {
-        missing.push(format!("initrd (tried: {})", INITRD_CANDIDATES.join(", ")));
+    // Extract initrd
+    match try_extract_candidates(&iso_path, &INITRD_CANDIDATES, &destination, "initrd") {
+        Ok(true) => {},
+        Ok(false) => missing.push("initrd"),
+        Err(e) => {
+            spinner.finish_error(&format!("extraction failed: {}", e));
+            return Err(format!("Extraction error: {}\n• Check if ISO file is corrupted", e));
+        }
     }
 
-    let _ = try_extract_candidates(
-        &iso_path,
-        &ROOTFS_CANDIDATES,
-        &destination,
-        "filesystem.squashfs",
-    )
-    .map_err(|e| e.to_string())?;
+    // Extract filesystem
+    let _ = try_extract_candidates(&iso_path, &ROOTFS_CANDIDATES, &destination, "filesystem.squashfs")
+        .map_err(|e| e.to_string())?;
 
     // If initial candidate extraction failed for any file, run dynamic scanner as a fallback.
     if !is_complete_extracted(layout, &extracted_id) {
-        // attempt dynamic scan and extract once
         match dynamic_scan_and_extract(&iso_path, &destination) {
             Ok(true) => {
-                // success - continue
+                spinner.finish(&format!("Extraction complete ({})", iso_name));
+                let vmlinuz_path = destination.join("vmlinuz").exists().then(|| "vmlinuz".to_string());
+                let initrd_path = destination.join("initrd").exists().then(|| "initrd".to_string());
+                let rootfs_path = destination.join("filesystem.squashfs").exists().then(|| "filesystem.squashfs".to_string());
+                let _ = cache::save_to_cache(&iso_path, vmlinuz_path, initrd_path, rootfs_path, "Linux".to_string());
+                return Ok(extracted_id);
             }
             Ok(false) => {
-                // still incomplete; report what we tried
-                return Err(format!(
-                    "extraction incomplete for {}; missing: {}",
-                    extracted_id,
-                    missing.join("; ")
-                ));
+                let hint = if missing.contains(&"vmlinuz") && missing.contains(&"initrd") {
+                    "• ISO may not be a standard Live ISO\n• Check if this is an installer ISO (Anaconda, etc.)"
+                } else if missing.contains(&"vmlinuz") {
+                    "• kernel file not found in standard locations"
+                } else if missing.contains(&"initrd") {
+                    "• initramfs not found in standard locations"
+                } else {
+                    "• core extraction files missing"
+                };
+                spinner.finish_error(&format!("extraction incomplete for {}", iso_name));
+                return Err(format!("Extraction failed for {}.\nMissing: {}\n\nTroubleshoot:\n{}", extracted_id, missing.join(", "), hint));
             }
-            Err(e) => return Err(format!("extraction failed during dynamic scan: {}", e)),
+            Err(e) => {
+                spinner.finish_error(&format!("extraction failed: {}", e));
+                return Err(format!("Extraction error: {}\n• Check if ISO file is corrupted", e));
+            }
         }
     }
 
     if !is_complete_extracted(layout, &extracted_id) {
-        return Err(format!(
-            "extraction incomplete for {}; missing: {}",
-            extracted_id,
-            missing.join("; ")
-        ));
+        let hint = if missing.contains(&"vmlinuz") && missing.contains(&"initrd") {
+            "• ISO may not be a standard Live ISO\n• Check if this is an installer ISO (Anaconda, etc.)"
+        } else if missing.contains(&"vmlinuz") {
+            "• kernel file not found in standard locations"
+        } else if missing.contains(&"initrd") {
+            "• initramfs not found in standard locations"
+        } else {
+            "• core extraction files missing"
+        };
+        spinner.finish_error(&format!("extraction incomplete for {}", iso_name));
+        return Err(format!("Extraction failed for {}.\nMissing: {}\n\nTroubleshoot:\n{}", extracted_id, missing.join(", "), hint));
     }
+
+    spinner.finish(&format!("Extraction complete ({})", iso_name));
+
+    // Save to cache after successful extraction
+    let vmlinuz_path = destination.join("vmlinuz").exists().then(|| "vmlinuz".to_string());
+    let initrd_path = destination.join("initrd").exists().then(|| "initrd".to_string());
+    let rootfs_path = destination.join("filesystem.squashfs").exists().then(|| "filesystem.squashfs".to_string());
+
+    let _ = cache::save_to_cache(&iso_path, vmlinuz_path, initrd_path, rootfs_path, "Linux".to_string());
 
     Ok(extracted_id)
 }

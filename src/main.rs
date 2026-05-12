@@ -3,6 +3,8 @@ mod grub;
 mod iso;
 mod layout;
 mod profile;
+mod cache;
+mod spinner;
 
 use crate::extract::{
     extract_casper, is_complete_extracted, is_supported_linux_family, mark_extracted_images,
@@ -1194,7 +1196,10 @@ fn run_guided_test_flow_interactive(
 
     #[cfg(windows)]
     {
+        let spinner = crate::spinner::Spinner::new("Scanning partitions");
         let volumes = list_windows_volumes()?;
+        spinner.finish("Partition scan complete");
+        
         let root_candidates: Vec<WindowsVolume> = volumes
             .iter()
             .filter(|volume| volume.filesystem.eq_ignore_ascii_case("NTFS"))

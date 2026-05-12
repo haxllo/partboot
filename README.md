@@ -217,6 +217,9 @@ The implementation plan is in
 The shutdown loop follow-up plan is in
 `docs/plans/2026-05-07-shutdown-loop-fix.md`.
 
+Phase 4 platform integration kickoff plan is in
+`docs/plans/2026-05-12-phase-4-platform-integration.md`.
+
 ## Troubleshooting
 
 ### Common command errors
