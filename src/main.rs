@@ -85,7 +85,7 @@ enum Command {
         json: bool,
         dry_run_install: bool,
     },
-    GuidedTestFlowInteractive {
+    StartInteractive {
         include_diagnostics: bool,
         dry_run_install: bool,
     },
@@ -98,14 +98,18 @@ enum Command {
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
-    match parse_command(&args).and_then(run) {
-        Ok(()) => {}
+    let command = match parse_command(&args) {
+        Ok(command) => command,
         Err(error) => {
             eprintln!("error: {error}");
-            eprintln!();
-            print_help();
+            eprintln!("hint: run 'partboot --help' for command usage.");
             process::exit(2);
         }
+    };
+
+    if let Err(error) = run(command) {
+        eprintln!("error: {error}");
+        process::exit(2);
     }
 }
 
@@ -298,11 +302,11 @@ fn run(command: Command) -> Result<(), String> {
                 dry_run_install,
             )?;
         }
-        Command::GuidedTestFlowInteractive {
+        Command::StartInteractive {
             include_diagnostics,
             dry_run_install,
         } => {
-            run_guided_test_flow_interactive(include_diagnostics, dry_run_install)?;
+            run_start_interactive(include_diagnostics, dry_run_install)?;
         }
         Command::VolumeId { drive } => {
             print_volume_id(&drive)?;
@@ -316,7 +320,7 @@ fn run(command: Command) -> Result<(), String> {
 }
 
 fn parse_command(args: &[String]) -> Result<Command, String> {
-    if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
+    if args.is_empty() || args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
         return Ok(Command::Help);
     }
 
@@ -376,7 +380,7 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
             json: has_flag(args, "--json"),
             dry_run_install: has_flag(args, "--dry-run-install"),
         }),
-        "guided-test-flow-interactive" | "start" => Ok(Command::GuidedTestFlowInteractive {
+        "start" => Ok(Command::StartInteractive {
             include_diagnostics: has_flag(args, "--include-diagnostics"),
             dry_run_install: has_flag(args, "--dry-run-install"),
         }),
@@ -1183,7 +1187,7 @@ struct WindowsVolume {
     label: Option<String>,
 }
 
-fn run_guided_test_flow_interactive(
+fn run_start_interactive(
     include_diagnostics: bool,
     dry_run_install: bool,
 ) -> Result<(), String> {
@@ -1191,7 +1195,7 @@ fn run_guided_test_flow_interactive(
     {
         let _ = include_diagnostics;
         let _ = dry_run_install;
-        return Err("start/guided-test-flow-interactive is currently Windows only".to_string());
+        return Err("start is currently Windows only".to_string());
     }
 
     #[cfg(windows)]
@@ -2094,21 +2098,22 @@ fn parse_volume_serial(output: &str) -> Option<String> {
 
 fn print_help() {
     println!("partboot {}", env!("CARGO_PKG_VERSION"));
+    println!("Usage: partboot <command> [options]");
     println!();
-    println!("Commands:");
+    println!("Quick start:");
+    println!("  partboot start [--include-diagnostics] [--dry-run-install]");
+    println!("  partboot guided-test-flow --root <path> --esp <path> --partition-uuid <uuid> [--partition-label <label>] [--iso <name>] [--include-diagnostics] [--dry-run-install] [--json]");
+    println!();
+    println!("Core commands:");
     println!("  init --root <path>");
     println!("  scan --root <path> [--json]");
     println!("  extract --root <path> --iso <iso-name-or-path>");
     println!("  generate-menu --root <path> --partition-uuid <uuid> [--partition-label <label>] [--include-diagnostics] [--json] [--output <path>]");
     println!("  stage-efi --root <path> --grub-x64 <path> [--boot-x64 <path>] [--output <path>]");
-    println!("  install-esp --root <path> --esp <path> --dry-run");
-    println!("  install-esp --root <path> --esp <path> --force");
-    println!("  install-fallback --root <path> --esp <path> --dry-run");
-    println!("  install-fallback --root <path> --esp <path> --force");
+    println!("  install-esp --root <path> --esp <path> (--dry-run | --force)");
+    println!("  install-fallback --root <path> --esp <path> (--dry-run | --force)");
     println!("  boot-instructions --esp <path>");
     println!("  doctor --root <path> [--esp <path>] [--json]");
-    println!("  guided-test-flow --root <path> --esp <path> --partition-uuid <uuid> [--partition-label <label>] [--iso <name>] [--include-diagnostics] [--dry-run-install] [--json]");
-    println!("  start [--include-diagnostics] [--dry-run-install]  (alias: guided-test-flow-interactive)");
     println!("  volume-id --drive <letter>");
     println!("  recommend-test-partitions");
 }
@@ -2361,29 +2366,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_guided_test_flow_interactive_command() {
-        let command = parse_command(&args(&[
-            "guided-test-flow-interactive",
-            "--include-diagnostics",
-            "--dry-run-install",
-        ]))
-        .unwrap();
-        assert_eq!(
-            command,
-            Command::GuidedTestFlowInteractive {
-                include_diagnostics: true,
-                dry_run_install: true
-            }
-        );
-    }
-
-    #[test]
-    fn parse_start_alias_command() {
+    fn parse_start_command() {
         let command = parse_command(&args(&["start", "--include-diagnostics", "--dry-run-install"]))
             .unwrap();
         assert_eq!(
             command,
-            Command::GuidedTestFlowInteractive {
+            Command::StartInteractive {
                 include_diagnostics: true,
                 dry_run_install: true
             }
