@@ -5,7 +5,8 @@ This guide covers local development, automation, release packaging, and implemen
 ## Prerequisites
 
 - Rust 1.95 or newer.
-- `stable-x86_64-pc-windows-gnu` Rust toolchain.
+- Git.
+- Microsoft C++ Build Tools or Visual Studio with the C++ workload when using the default Windows MSVC Rust toolchain.
 - 7-Zip available in `PATH`, or `PARTBOOT_7Z_PATH` set to the full path of `7z.exe`.
 - PowerShell 7+ for release scripts.
 - A disposable test partition for boot workflow testing.
@@ -15,21 +16,21 @@ This guide covers local development, automation, release packaging, and implemen
 Build the release binary:
 
 ```powershell
-cargo +stable-x86_64-pc-windows-gnu build --release
+cargo build --release
 ```
 
 Run the test suite:
 
 ```powershell
-cargo +stable-x86_64-pc-windows-gnu test
+cargo test
 ```
 
 Run the CLI during development:
 
 ```powershell
-cargo +stable-x86_64-pc-windows-gnu run -- start
-cargo +stable-x86_64-pc-windows-gnu run -- scan --root H:\partboot
-cargo +stable-x86_64-pc-windows-gnu run -- doctor --root H:\partboot
+cargo run -- start
+cargo run -- scan --root H:\partboot
+cargo run -- doctor --root H:\partboot
 ```
 
 Before opening a pull request, run:
@@ -37,7 +38,7 @@ Before opening a pull request, run:
 ```powershell
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
-cargo +stable-x86_64-pc-windows-gnu test
+cargo test
 ```
 
 ## Project Layout

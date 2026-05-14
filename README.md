@@ -14,23 +14,51 @@ PartBoot is a disk-resident ISO boot manager for UEFI systems. It lets you keep 
 
 Windows installer ISOs are detected but not booted yet. See [Future Work](docs/future-work.md).
 
-## Requirements
+## Runtime Requirements
 
 - Windows with UEFI firmware.
-- Rust 1.95 or newer when building from source.
 - 7-Zip installed or `PARTBOOT_7Z_PATH` pointing to `7z.exe`.
 - A separate NTFS test partition, recommended size 16-64 GB.
 - Secure Boot disabled unless you provide your own trusted EFI signing flow.
 
 ## Installation
 
-Build from source:
+Install with WinGet:
 
 ```powershell
-cargo +stable-x86_64-pc-windows-gnu build --release
+winget install --id Haxllo.PartBoot --exact
 ```
 
-Run the binary from `target\release\partboot.exe`, or copy it to a directory on your `PATH`.
+WinGet can lag the latest GitHub or crates.io release while the package submission is reviewed.
+
+Install with Cargo:
+
+```powershell
+cargo install partboot
+```
+
+`cargo install` builds from source, so it requires the Rust and C++ build tools listed below.
+
+Or download `partboot.exe` from the [GitHub Releases](https://github.com/haxllo/partboot/releases) page.
+
+## Building from Source
+
+Source builds are only needed when you want to modify PartBoot or test an unreleased change.
+
+Build requirements:
+
+- Rust 1.95 or newer.
+- Git.
+- Microsoft C++ Build Tools or Visual Studio with the C++ workload when using the default Windows MSVC Rust toolchain.
+- 7-Zip for ISO extraction tests and local end-to-end runs.
+
+Build the binary:
+
+```powershell
+cargo build --release
+```
+
+Run it from `target\release\partboot.exe`.
 
 ## Quick Start
 
