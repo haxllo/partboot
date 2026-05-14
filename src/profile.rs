@@ -56,11 +56,15 @@ pub fn ensure_profile_for_iso_name(
 
     fs::create_dir_all(&layout.profiles).map_err(|error| error.to_string())?;
     let path = profile_path(layout, iso_name);
-    if path.exists() {
-        return Ok(None);
-    }
-
     let content = default_profile(iso_name, &family);
+    if path.exists() {
+        let current = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        if current == content {
+            return Ok(None);
+        }
+        fs::write(&path, content).map_err(|error| error.to_string())?;
+        return Ok(Some(path));
+    }
     fs::write(&path, content).map_err(|error| error.to_string())?;
     Ok(Some(path))
 }
@@ -192,4 +196,44 @@ pub fn count_profile_files(layout: &PartBootLayout) -> Result<usize, String> {
         }
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_layout_root() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("partboot-profile-test-{unique}"))
+    }
+
+    #[test]
+    fn ensure_profile_rewrites_stale_content() {
+        let root = temp_layout_root();
+        let layout = PartBootLayout::new(&root);
+        fs::create_dir_all(&layout.profiles).unwrap();
+
+        let profile_path = layout.profiles.join("ubuntu-24.04.profile");
+        fs::write(&profile_path, "name=ubuntu-24.04.iso\nfamily=ubuntu\npreferred_mode=extracted\nfallback_mode=iso_toram\nvisible_fallback=true\n")
+            .unwrap();
+
+        let changed = ensure_profile_for_iso_name(&layout, "ubuntu-24.04.iso")
+            .expect("profile repair should succeed");
+        assert_eq!(changed, Some(profile_path.clone()));
+
+        let repaired = fs::read_to_string(&profile_path).unwrap();
+        assert!(repaired.contains("preferred_mode=iso_toram"));
+        assert!(repaired.contains("visible_fallback=false"));
+
+        let unchanged = ensure_profile_for_iso_name(&layout, "ubuntu-24.04.iso")
+            .expect("second repair should succeed");
+        assert_eq!(unchanged, None);
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }
