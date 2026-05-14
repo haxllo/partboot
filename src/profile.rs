@@ -91,14 +91,9 @@ fn profile_path(layout: &PartBootLayout, iso_name: &str) -> PathBuf {
 
 fn default_profile(iso_name: &str, family: &IsoFamily) -> String {
     let family_label = profile_family_name(family);
-    let preferred_mode = if matches!(family, IsoFamily::UbuntuCasper) {
-        "extracted"
-    } else {
-        "iso_toram"
-    };
     format!(
-        "name={}\nfamily={}\npreferred_mode={}\nfallback_mode=iso_toram\nvisible_fallback=true\n",
-        iso_name, family_label, preferred_mode
+        "name={}\nfamily={}\npreferred_mode=iso_toram\nfallback_mode=iso_toram\nvisible_fallback=false\n",
+        iso_name, family_label
     )
 }
 
@@ -197,16 +192,4 @@ pub fn count_profile_files(layout: &PartBootLayout) -> Result<usize, String> {
         }
     }
     Ok(count)
-}
-
-pub fn default_boot_mode(image: &IsoImage) -> BootMode {
-    if image.extracted_id.is_some() {
-        BootMode::Extracted
-    } else {
-        BootMode::IsoToram
-    }
-}
-
-pub fn fallback_boot_mode() -> BootMode {
-    BootMode::IsoToram
 }

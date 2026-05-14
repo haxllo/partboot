@@ -1,13 +1,13 @@
 use crate::iso::{IsoFamily, IsoImage};
 use crate::layout::display_path;
-use crate::profile::{default_boot_mode, fallback_boot_mode, BootMode, IsoProfile};
+use crate::profile::IsoProfile;
 
 pub fn generate_grub_cfg(
     images: &[IsoImage],
     partition_uuid: &str,
     partition_label: Option<&str>,
     include_diagnostics: bool,
-    profiles: &[IsoProfile],
+    _profiles: &[IsoProfile],
 ) -> String {
     let mut cfg = String::new();
     cfg.push_str(&header());
@@ -37,7 +37,7 @@ pub fn generate_grub_cfg(
     }
 
     for image in images {
-        cfg.push_str(&entry_for_image(image, profile_for_image(profiles, image)));
+        cfg.push_str(&entry_for_image(image));
         cfg.push('\n');
     }
     if include_diagnostics {
@@ -67,9 +67,9 @@ fn header() -> String {
     .join("\n")
 }
 
-fn entry_for_image(image: &IsoImage, profile: Option<&IsoProfile>) -> String {
+fn entry_for_image(image: &IsoImage) -> String {
     match image.family {
-        IsoFamily::UbuntuCasper => ubuntu_entry(image, profile),
+        IsoFamily::UbuntuCasper => ubuntu_entry(image),
         IsoFamily::DebianLive => debian_entry(image),
         IsoFamily::Arch => arch_entry(image),
         IsoFamily::Fedora => fedora_entry(image),
@@ -88,71 +88,16 @@ fn iso_grub_path(image: &IsoImage) -> String {
     format!("/partboot/isos/{}", escape_grub(&image.name))
 }
 
-fn profile_for_image<'a>(profiles: &'a [IsoProfile], image: &IsoImage) -> Option<&'a IsoProfile> {
-    profiles
-        .iter()
-        .find(|profile| profile.name.eq_ignore_ascii_case(&image.name))
-}
-
-fn ubuntu_entry(image: &IsoImage, profile: Option<&IsoProfile>) -> String {
-    let preferred_mode = profile
-        .map(|value| value.preferred_mode)
-        .unwrap_or_else(|| default_boot_mode(image));
-    let fallback_mode = profile
-        .map(|value| value.fallback_mode)
-        .unwrap_or_else(fallback_boot_mode);
-    let visible_fallback = profile.map(|value| value.visible_fallback).unwrap_or(true);
-
-    let primary_mode = if mode_available(preferred_mode, image) {
-        preferred_mode
-    } else {
-        fallback_mode
-    };
-
-    let mut entry = render_ubuntu_entry(image, primary_mode, &escape_grub(&image.name));
-    if visible_fallback && fallback_mode != primary_mode && mode_available(fallback_mode, image) {
-        entry.push('\n');
-        entry.push_str(&render_ubuntu_entry(
-            image,
-            fallback_mode,
-            &format!("{} [Fallback]", escape_grub(&image.name)),
-        ));
-    }
-    entry
-}
-
-fn mode_available(mode: BootMode, image: &IsoImage) -> bool {
-    match mode {
-        BootMode::Extracted => image.extracted_id.is_some(),
-        BootMode::IsoToram => true,
-    }
-}
-
-fn render_ubuntu_entry(image: &IsoImage, mode: BootMode, label: &str) -> String {
-    match mode {
-        BootMode::Extracted => ubuntu_extracted_entry(image, label),
-        BootMode::IsoToram => ubuntu_iso_toram_entry(image, label),
-    }
+fn ubuntu_entry(image: &IsoImage) -> String {
+    ubuntu_iso_toram_entry(image, &escape_grub(&image.name))
 }
 
 fn ubuntu_iso_toram_entry(image: &IsoImage, label: &str) -> String {
     let iso = iso_grub_path(image);
     format!(
-        "menuentry '{}' --class ubuntu {{\n    set isofile='{}'\n    echo 'Ubuntu live mode copied into RAM for clean shutdown'\n    loopback loop ($partboot_root)$isofile\n    linux (loop)/casper/vmlinuz boot=casper iso-scan/filename=$isofile toram noprompt quiet splash ---\n    initrd (loop)/casper/initrd\n}}\n",
+        "menuentry '{}' --class ubuntu {{\n    set isofile='{}'\n    loopback loop ($partboot_root)$isofile\n    linux (loop)/casper/vmlinuz boot=casper iso-scan/filename=$isofile toram noprompt quiet splash ---\n    initrd (loop)/casper/initrd\n}}\n",
         escape_grub(label),
         iso
-    )
-}
-
-fn ubuntu_extracted_entry(image: &IsoImage, label: &str) -> String {
-    let extracted_id = image.extracted_id.as_deref().unwrap_or("");
-    let casper_path = format!("/partboot/extracted/{}/casper", escape_grub(extracted_id));
-    format!(
-        "menuentry '{}' --class ubuntu {{\n    echo 'Ubuntu extracted Casper mode'\n    linux ($partboot_root){}/vmlinuz boot=casper live-media=/dev/disk/by-uuid/$partboot_uuid live-media-path={} ignore_uuid noprompt quiet splash ---\n    initrd ($partboot_root){}/initrd\n}}\n",
-        escape_grub(label),
-        casper_path,
-        casper_path,
-        casper_path
     )
 }
 
@@ -230,13 +175,13 @@ mod tests {
         assert!(cfg.contains("search --no-floppy --fs-uuid --set=partboot_root ABCD-1234"));
         assert!(cfg.contains("search --no-floppy --label --set=partboot_root 'partboottest'"));
         assert!(cfg.contains("menuentry 'ubuntu-24.04.iso' --class ubuntu"));
+        assert!(!cfg.contains("[Fallback]"));
+        assert!(!cfg.contains("Ubuntu live mode copied into RAM"));
         assert!(!cfg.contains("PartBoot diagnostics"));
-        assert!(!cfg.contains("(safe shutdown)"));
-        assert!(!cfg.contains("(debug)"));
     }
 
     #[test]
-    fn ubuntu_grub_entry_prefers_extracted_casper() {
+    fn ubuntu_grub_entry_stays_single_even_when_extracted_exists() {
         let image = IsoImage {
             name: "ubuntu-24.04.iso".to_string(),
             path: PathBuf::from("X:/partboot/isos/ubuntu-24.04.iso"),
@@ -245,18 +190,10 @@ mod tests {
             extracted_id: Some("ubuntu-24.04".to_string()),
         };
         let cfg = generate_grub_cfg(&[image], "ABCD-1234", Some("partboottest"), false, &[]);
-        assert!(cfg.contains("live-media-path=/partboot/extracted/ubuntu-24.04/casper"));
-        assert!(cfg.contains("live-media=/dev/disk/by-uuid/$partboot_uuid"));
-        assert!(cfg.contains("ignore_uuid"));
         assert!(cfg.contains("menuentry 'ubuntu-24.04.iso' --class ubuntu"));
-        assert!(
-            cfg.contains("linux ($partboot_root)/partboot/extracted/ubuntu-24.04/casper/vmlinuz")
-        );
-        assert!(
-            cfg.contains("initrd ($partboot_root)/partboot/extracted/ubuntu-24.04/casper/initrd")
-        );
-        assert!(cfg.contains("menuentry 'ubuntu-24.04.iso [Fallback]' --class ubuntu"));
-        assert!(cfg.contains("loopback loop"));
+        assert!(!cfg.contains("menuentry 'ubuntu-24.04.iso [Fallback]'"));
+        assert!(!cfg.contains("live-media-path=/partboot/extracted/ubuntu-24.04/casper"));
+        assert!(!cfg.contains("Ubuntu extracted Casper mode"));
         assert!(cfg.contains("toram noprompt quiet splash"));
     }
 
