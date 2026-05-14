@@ -1,149 +1,70 @@
 # PartBoot
 
-PartBoot is a disk-resident ISO boot manager. Boot Linux ISOs from an SSD/HDD partition instead of a USB flash drive.
+PartBoot is a disk-resident ISO boot manager for UEFI systems. It lets you keep Linux ISO images on a local partition and boot them through a generated GRUB menu instead of preparing a USB drive for each installer or live image.
 
-## Getting Started
+> PartBoot is early-stage software. Test it on a disposable partition first and do not point it at a partition that contains personal data, an installed operating system, or recovery media.
 
-### Quick Start
+## Features
 
-Run the interactive wizard:
+- Interactive `partboot start` workflow for scanning, extracting, menu generation, and EFI staging.
+- ISO discovery and boot profiles for Ubuntu, Debian/Kali, Arch, Fedora, and other GRUB-compatible Linux live images.
+- Generated GRUB configuration with optional diagnostics.
+- EFI staging and install helpers with explicit `--dry-run` / `--force` safeguards.
+- JSON output for automation-oriented commands.
 
+Windows installer ISOs are detected but not booted yet. See [Future Work](docs/future-work.md).
+
+## Requirements
+
+- Windows with UEFI firmware.
+- Rust 1.95 or newer when building from source.
+- 7-Zip installed or `PARTBOOT_7Z_PATH` pointing to `7z.exe`.
+- A separate NTFS test partition, recommended size 16-64 GB.
+- Secure Boot disabled unless you provide your own trusted EFI signing flow.
+
+## Installation
+
+Build from source:
+
+```powershell
+cargo +stable-x86_64-pc-windows-gnu build --release
 ```
+
+Run the binary from `target\release\partboot.exe`, or copy it to a directory on your `PATH`.
+
+## Quick Start
+
+Start the guided workflow:
+
+```powershell
 partboot start
 ```
 
-This will:
-1. Detect your available partitions
-2. Auto-import ISO files from the selected drive
-3. Extract boot files from supported Linux ISOs
-4. Generate a GRUB boot menu
-5. Show you how to install it to your EFI partition
+The wizard will:
 
-### Supported ISOs
+1. Detect available partitions.
+2. Import ISO files into the selected PartBoot directory.
+3. Extract boot files from supported Linux ISOs.
+4. Generate a GRUB boot menu.
+5. Stage EFI files and print the installation instructions.
 
-- Ubuntu (all variants)
-- Debian / Kali Linux
-- Arch Linux
-- Fedora
-- Most GRUB-compatible Linux distributions
+After reviewing the generated files, install them to an EFI system partition:
 
-Windows installer ISOs are detected but not yet supported.
-
-## How It Works
-
-PartBoot creates a `partboot` directory on your chosen partition:
-
-```
-H:\partboot
-├─ isos\           (your ISO files)
-├─ cache\          (downloaded EFI binaries)
-├─ extracted\      (extracted boot files)
-├─ profiles\       (boot configurations)
-├─ efi\            (staged GRUB files)
-└─ generated\      (final GRUB menu)
+```powershell
+partboot install-esp --root <PARTBOOT_ROOT> --esp <ESP_PATH> --force
+partboot boot-instructions --esp <ESP_PATH>
 ```
 
-When you run `partboot start`, it:
-1. **Imports ISOs** from your drive root if the directory is empty
-2. **Extracts boot files** for supported Linux distributions
-3. **Generates a GRUB menu** that boots any of them
-4. **Auto-downloads EFI binaries** from GitHub if not bundled
-5. **Shows installation steps** to copy files to your EFI partition
+Then reboot and select the PartBoot entry from the firmware boot menu.
 
-## Installation to EFI
+## Documentation
 
-Once you're happy with the generated boot menu, copy the files to your EFI partition:
+- [Usage Guide](docs/usage.md): command reference, supported ISO families, partition guidance, and troubleshooting.
+- [Developer Guide](DEVELOPMENT.md): build, test, release, and implementation notes.
+- [GRUB Strategy](docs/architecture/grub-strategy.md): EFI and GRUB architecture notes.
+- [Future Work](docs/future-work.md): known limitations and planned improvements.
+- [Contributing](CONTRIBUTING.md): contribution workflow and quality expectations.
 
-```
-partboot install-esp --root <PARTITION_PATH> --esp <EFI_PARTITION_PATH> --force
-partboot boot-instructions --esp <EFI_PARTITION_PATH>
-```
+## License
 
-Then reboot and select the new boot entry from your firmware menu.
-
-## Troubleshooting
-
-## ISO Support
-
-Supported in the generated GRUB menu:
-
-- Ubuntu-style Casper live ISOs
-- Debian/Kali-style live ISOs
-- Arch-style live ISOs
-- Fedora-style live ISOs
-
-Experimental or blocked:
-
-- Windows installer ISOs are detected, but the MVP emits a disabled menu entry.
-  Windows support needs a `wimboot` or extracted-installer backend.
-- Unknown ISOs are detected, but need explicit boot profiles.
-
-## Testing Partition Recommendation
-
-Yes, create a separate disposable partition for testing.
-
-Start with **one NTFS partition** around 16-64 GB. That is the safest first
-target from Windows because it supports large ISO files and is easy to inspect.
-Use it only for PartBoot testing, for example as `H:\partboot`.
-
-Add filesystems in this order:
-
-1. **NTFS** first: best first test target on Windows; supports large ISOs.
-2. **FAT32** later: useful for EFI-file experiments, but cannot store files over
-   4 GB.
-3. **ext4** later: useful for Linux-first testing, but Windows will not manage it
-   comfortably.
-
-Do not test on a partition that contains personal data, an installed OS, or a
-recovery image.
-
-
-## Advanced Usage
-
-For advanced workflows (command-line scripting, JSON output, custom boot profiles), see [DEVELOPMENT.md](./DEVELOPMENT.md).
-
-## Troubleshooting
-
-### PartBoot fails to start
-
-**Error: "Cannot find 7z"**
-- Install 7-Zip from the Microsoft Store or https://www.7-zip.org
-- Or set `PARTBOOT_7Z_PATH=C:\Program Files\7-Zip\7z.exe` in Environment Variables
-
-**Error: "Cannot detect partition"**
-- Your partition must be mounted and visible in File Explorer
-- Try selecting a different drive letter in the partition menu
-- Check that your drive supports NTFS or FAT32 (exFAT is not supported)
-
-### Boot menu has no entries
-
-- ISO files must be in the `partboot/isos/` directory
-- Ubuntu ISOs must be "live" (desktop) variants, not server or minimal versions
-- If ISO extraction fails, check that your partition has at least 2 GB free space
-
-### Ubuntu boots but shows errors on shutdown
-
-This is expected behavior when using the ISO boot mode. The system is tearing down a live session that still depends on the ISO file.
-
-Workaround: After booting, save your files and shut down normally. Avoid force-resets.
-
-
-## Testing Partition Recommendation
-
-Yes, create a separate disposable partition for testing.
-
-Start with **one NTFS partition** around 16-64 GB. That is the safest first
-target from Windows because it supports large ISO files and is easy to inspect.
-Use it only for PartBoot testing, for example as `H:\partboot`.
-
-Add filesystems in this order:
-
-1. **NTFS** first: best first test target on Windows; supports large ISOs.
-2. **FAT32** later: useful for EFI-file experiments, but cannot store files over 4 GB.
-3. **ext4** later: useful for Linux-first testing, but Windows will not manage it comfortably.
-
-Do not test on a partition that contains personal data, an installed OS, or a recovery image.
-
-## Advanced Usage
-
-For advanced workflows (command-line scripting, JSON output, custom boot profiles), see [DEVELOPMENT.md](./DEVELOPMENT.md).
+PartBoot is licensed under the [MIT License](LICENSE).
