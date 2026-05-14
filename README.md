@@ -1,193 +1,67 @@
 # PartBoot
 
-PartBoot is a disk-resident ISO boot manager design and prototype. The goal is
-to boot ISO images from a selected internal SSD/HDD partition using a small boot
-entry and generated GRUB configuration, instead of requiring a dedicated USB
-flash drive.
+PartBoot is a disk-resident ISO boot manager. Boot Linux ISOs from an SSD/HDD partition instead of a USB flash drive.
 
-The current MVP is intentionally conservative: it does not repartition disks,
-write firmware boot entries, install GRUB, or modify an EFI System Partition. It
-creates a PartBoot directory layout, scans ISO files, classifies common images,
-and generates a GRUB config that can be inspected before any bootloader work is
-attempted.
+## Getting Started
 
-## Current Commands
+### Quick Start
 
-Run commands in this repo with the stable GNU toolchain prefix:
+Run the interactive wizard:
 
-```powershell
-cargo +stable-x86_64-pc-windows-gnu run -- <subcommand>
+```
+partboot start
 ```
 
-```powershell
-cargo run -- init --root <ROOT_PATH>
-cargo run -- scan --root <ROOT_PATH>
-cargo run -- extract --root <ROOT_PATH> --iso <ISO_NAME_OR_PATH>
-cargo run -- volume-id --drive <DRIVE_LETTER:>
-cargo run -- generate-menu --root <ROOT_PATH> --partition-uuid <PARTITION_UUID> --partition-label <PARTITION_LABEL>
-cargo run -- stage-efi --root <ROOT_PATH> --grub-x64 <GRUB_X64_PATH> --boot-x64 <BOOT_X64_PATH>
-cargo run -- install-esp --root <ROOT_PATH> --esp <ESP_PATH> --force
-cargo run -- install-fallback --root <ROOT_PATH> --esp <ESP_PATH> --force
-cargo run -- boot-instructions --esp <ESP_PATH>
-cargo run -- doctor --root <ROOT_PATH> --esp <ESP_PATH>
-cargo run -- guided-test-flow --root <ROOT_PATH> --esp <ESP_PATH> --partition-uuid <PARTITION_UUID> --partition-label <PARTITION_LABEL>
-cargo run -- start
+This will:
+1. Detect your available partitions
+2. Auto-import ISO files from the selected drive
+3. Extract boot files from supported Linux ISOs
+4. Generate a GRUB boot menu
+5. Show you how to install it to your EFI partition
+
+### Supported ISOs
+
+- Ubuntu (all variants)
+- Debian / Kali Linux
+- Arch Linux
+- Fedora
+- Most GRUB-compatible Linux distributions
+
+Windows installer ISOs are detected but not yet supported.
+
+## How It Works
+
+PartBoot creates a `partboot` directory on your chosen partition:
+
 ```
-
-Use the real value printed by `volume-id` in place of `<PARTITION_UUID>`. For NTFS,
-run `volume-id` or `fsutil fsinfo ntfsinfo <DRIVE_LETTER:>` from an elevated terminal so the
-full NTFS serial is available. If the ISO partition has a stable label, pass it
-with `--partition-label` so GRUB has a fallback when firmware/GRUB reports an
-NTFS UUID differently from Windows.
-Short NTFS serial values (for example `12B8CF0C`) are not accepted for menu
-generation; use the full NTFS UUID (for example `9412B8E612B8CF0C`).
-If admin rights are required for `fsutil`, PartBoot now auto-prompts for UAC and
-re-runs the command elevated.
-
-Expected directory layout:
-
-```text
 H:\partboot
-├─ isos\
-├─ profiles\
-├─ cache\
-├─ extracted\
-│  └─ ubuntu-22.04.5-desktop-amd64\
-│     └─ casper\
-│        ├─ filesystem.squashfs
-│        ├─ initrd
-│        └─ vmlinuz
-├─ efi\
-│  └─ EFI\
-│     └─ PartBoot\
-│        ├─ bootx64.efi
-│        ├─ grubx64.efi
-│        ├─ grub.cfg
-│        └─ README.txt
-└─ generated\
-   └─ grub.cfg
+├─ isos\           (your ISO files)
+├─ cache\          (downloaded EFI binaries)
+├─ extracted\      (extracted boot files)
+├─ profiles\       (boot configurations)
+├─ efi\            (staged GRUB files)
+└─ generated\      (final GRUB menu)
 ```
 
-`stage-efi` copies the generated GRUB config, a supplied `grubx64.efi`, and
-optionally a `bootx64.efi` shim/fallback loader into
-`<root>\efi\EFI\PartBoot`. It does not copy anything to the real EFI System
-Partition and does not create firmware boot entries.
+When you run `partboot start`, it:
+1. **Imports ISOs** from your drive root if the directory is empty
+2. **Extracts boot files** for supported Linux distributions
+3. **Generates a GRUB menu** that boots any of them
+4. **Auto-downloads EFI binaries** from GitHub if not bundled
+5. **Shows installation steps** to copy files to your EFI partition
 
-`install-esp` copies staged files into an explicitly supplied FAT32 ESP/test
-partition path. It requires either `--dry-run` or `--force`, validates FAT32 on
-Windows, and only writes under `EFI\PartBoot`. It still does not create firmware
-boot entries.
+## Installation to EFI
 
-`boot-instructions` validates the copied EFI files and prints the manual
-firmware boot path. Use this before adding any persistent boot entry.
+Once you're happy with the generated boot menu, copy the files to your EFI partition:
 
-`install-fallback` copies the staged loader to the standard UEFI fallback path
-`EFI\Boot\bootx64.efi`. Use this when firmware does not provide a file browser;
-after installing it, reboot and choose the UEFI entry for that disk/partition.
-
-`extract` uses `7z` to extract Linux boot files from an ISO. When complete
-extracted files exist (`vmlinuz` + `initrd`), `generate-menu` can use extracted
-mode where supported and keeps ISO boot fallback entries. PartBoot also creates
-per-ISO profile files in `partboot/profiles` for supported Linux families
-(Ubuntu, Debian/Kali, Arch, Fedora).
-If `7z` is not in PATH, set `PARTBOOT_7Z_PATH` to the 7z executable location.
-
-The generated GRUB menu keeps entry labels minimal: each main entry uses only
-the ISO name, and fallback entries use `[Fallback]`. Diagnostics are hidden by
-default and are only included when `--include-diagnostics` is passed.
-
-## UX workflows
-
-Quick path (single command):
-
-```powershell
-cargo run -- guided-test-flow --root <ROOT_PATH> --esp <ESP_PATH> --partition-uuid <PARTITION_UUID> --partition-label <PARTITION_LABEL>
+```
+partboot install-esp --root <PARTITION_PATH> --esp <EFI_PARTITION_PATH> --force
+partboot boot-instructions --esp <EFI_PARTITION_PATH>
 ```
 
-Interactive quick path (detect partitions, prompt for selections):
+Then reboot and select the new boot entry from your firmware menu.
 
-```powershell
-cargo run -- start
-```
-
-`start` auto-imports ISO files from the selected drive root (for example
-`H:\ubuntu.iso`) into `H:\partboot\isos\` when `partboot\isos` is empty. It
-tries move-first (same drive) to avoid requiring double disk space.
-`start` now uses a TUI-style wizard for partition selection (navigable with
-Up/Down arrows or `j`/`k`, number jump, Enter confirm).
-`start` now attempts extraction for supported Linux ISOs
-(Ubuntu, Debian/Kali, Arch, Fedora) instead of Ubuntu-only.
-`start` now also auto-populates `H:\partboot\cache` from bundled EFI assets
-(`assets\efi`) when cache binaries are missing, after checksum verification.
-If bundled assets are unavailable, PartBoot attempts a fallback download from
-GitHub Releases (`v<app-version>`) and verifies checksums before caching.
-The downloader tries PowerShell first, then `curl.exe` as a fallback.
-Override asset location with `PARTBOOT_EFI_ASSETS`.
-Override release source with `PARTBOOT_EFI_RELEASE_BASE` and
-`PARTBOOT_EFI_RELEASE_TAG`.
-
-## Release packaging
-
-Build a release bundle with bundled EFI assets:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Target x86_64-pc-windows-gnu
-```
-
-By default, packaging now:
-- checks `docs\release-efi-provenance.md` and fails if provenance is provisional/unknown
-- rebuilds `assets\efi\grubx64.efi` using `scripts\build-standalone-grub.ps1` (`grub-mkstandalone`)
-
-CI now includes a required OVMF/QEMU EFI smoke test (`.github/workflows/efi-smoke.yml`) that must reach a GRUB menu entry (not `grub rescue>`).
-
-If EFI binaries were replaced, regenerate and verify checksums while packaging:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Target x86_64-pc-windows-gnu -RefreshChecksums
-```
-
-Local-only bypass options (not for release):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Target x86_64-pc-windows-gnu -SkipStandaloneGrubBuild -SkipProvenanceCheck
-```
-
-Before or after publishing a GitHub release, verify required assets are present:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\check-release-assets.ps1 -Tag <RELEASE_TAG>
-```
-
-### Winget submission automation
-
-`winget-submit` workflow (`.github/workflows/winget-submit.yml`) opens a PR to
-`microsoft/winget-pkgs` after a **stable** GitHub release is published.
-
-- Skips prereleases.
-- Skips stale tags (only the latest stable release is submitted).
-- Supports manual backfill via workflow dispatch input (`tag`, optional `force`).
-
-Required repo secret:
-
-- `WINGET_TOKEN`: GitHub token with permissions needed by `wingetcreate --submit`
-  to open/update Winget PRs.
-
-See `docs/release-efi-provenance.md` for required provenance notes per release.
-
-Safe step-by-step path:
-
-```powershell
-cargo run -- init --root <ROOT_PATH>
-cargo run -- scan --root <ROOT_PATH>
-cargo run -- extract --root <ROOT_PATH> --iso <ISO_NAME_OR_PATH>
-cargo run -- generate-menu --root <ROOT_PATH> --partition-uuid <PARTITION_UUID> --partition-label <PARTITION_LABEL>
-cargo run -- stage-efi --root <ROOT_PATH> --grub-x64 <ROOT_PATH>\cache\grubx64.efi --boot-x64 <ROOT_PATH>\cache\bootx64.efi
-cargo run -- install-esp --root <ROOT_PATH> --esp <ESP_PATH> --force
-cargo run -- install-fallback --root <ROOT_PATH> --esp <ESP_PATH> --force
-cargo run -- doctor --root <ROOT_PATH> --esp <ESP_PATH>
-```
-
-For automation, `scan`, `generate-menu`, `doctor`, and `guided-test-flow` support `--json`.
+## Troubleshooting
 
 ## ISO Support
 
@@ -223,67 +97,53 @@ Add filesystems in this order:
 Do not test on a partition that contains personal data, an installed OS, or a
 recovery image.
 
-## Development Notes
 
-The implementation plan is in
-`docs/plans/2026-05-08-partboot-mvp.md`.
+## Advanced Usage
 
-The shutdown loop follow-up plan is in
-`docs/plans/2026-05-07-shutdown-loop-fix.md`.
-
-Phase 4 platform integration kickoff plan is in
-`docs/plans/2026-05-12-phase-4-platform-integration.md`.
+For advanced workflows (command-line scripting, JSON output, custom boot profiles), see [DEVELOPMENT.md](./DEVELOPMENT.md).
 
 ## Troubleshooting
 
-### Common command errors
+### PartBoot fails to start
 
-- `error: missing or unreadable checksum manifest ... assets\efi\checksums.txt`  
-  Cause: bundled EFI checksum manifest is missing.  
-  Fix:
+**Error: "Cannot find 7z"**
+- Install 7-Zip from the Microsoft Store or https://www.7-zip.org
+- Or set `PARTBOOT_7Z_PATH=C:\Program Files\7-Zip\7z.exe` in Environment Variables
 
-  ```powershell
-  powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Target x86_64-pc-windows-gnu -RefreshChecksums
-  ```
+**Error: "Cannot detect partition"**
+- Your partition must be mounted and visible in File Explorer
+- Try selecting a different drive letter in the partition menu
+- Check that your drive supports NTFS or FAT32 (exFAT is not supported)
 
-- `rustc ... is not supported` while running cargo commands  
-  Cause: wrong/default toolchain.  
-  Fix: run with `+stable-x86_64-pc-windows-gnu` prefix.
+### Boot menu has no entries
 
-### Ubuntu Boots But Shutdown Shows loop0 I/O Errors
+- ISO files must be in the `partboot/isos/` directory
+- Ubuntu ISOs must be "live" (desktop) variants, not server or minimal versions
+- If ISO extraction fails, check that your partition has at least 2 GB free space
 
-If Ubuntu boots from the PartBoot menu but shutdown or restart repeatedly prints
-messages like:
+### Ubuntu boots but shows errors on shutdown
 
-```text
-I/O error, dev loop0, sector 0
-```
+This is expected behavior when using the ISO boot mode. The system is tearing down a live session that still depends on the ISO file.
 
-then firmware boot, GRUB loading, partition discovery, and kernel startup all
-worked. The failure is later: Ubuntu's live session is tearing down a root
-filesystem that still depends on an ISO-backed loop device.
+Workaround: After booting, save your files and shut down normally. Avoid force-resets.
 
-The current Ubuntu entry uses:
 
-```text
-boot=casper iso-scan/filename=...
-```
+## Testing Partition Recommendation
 
-That boots successfully, but the live system still depends on the ISO file on
-the NTFS partition during shutdown. Testing showed that the `toram` path shuts
-down cleanly, so PartBoot now makes Ubuntu-style Casper entries use:
+Yes, create a separate disposable partition for testing.
 
-```text
-boot=casper iso-scan/filename=... toram noprompt
-```
+Start with **one NTFS partition** around 16-64 GB. That is the safest first
+target from Windows because it supports large ISO files and is easy to inspect.
+Use it only for PartBoot testing, for example as `H:\partboot`.
 
-This keeps ISO storage on NTFS while reducing shutdown dependency on the ISO
-loop device. It requires enough RAM to hold the live image and runtime.
+Add filesystems in this order:
 
-The preferred next mode is extracted Casper. After running `extract`, PartBoot
-boots `vmlinuz`, `initrd`, and `filesystem.squashfs` from
-`partboot/extracted/<iso-id>/casper`. This should reduce RAM pressure while
-still avoiding whole-ISO loop teardown during shutdown. Extracted mode is still
-experimental; it passes `ignore_uuid` because the extracted directory does not
-carry the ISO's full `.disk` metadata. If it fails, choose the generated ISO RAM
-fallback entry.
+1. **NTFS** first: best first test target on Windows; supports large ISOs.
+2. **FAT32** later: useful for EFI-file experiments, but cannot store files over 4 GB.
+3. **ext4** later: useful for Linux-first testing, but Windows will not manage it comfortably.
+
+Do not test on a partition that contains personal data, an installed OS, or a recovery image.
+
+## Advanced Usage
+
+For advanced workflows (command-line scripting, JSON output, custom boot profiles), see [DEVELOPMENT.md](./DEVELOPMENT.md).
