@@ -1,4 +1,5 @@
 mod extract;
+mod boot_entry;
 mod grub;
 mod iso;
 mod layout;
@@ -8,6 +9,9 @@ mod spinner;
 
 use crate::extract::{
     extract_casper, is_complete_extracted, is_supported_linux_family, mark_extracted_images,
+};
+use crate::boot_entry::{
+    create_boot_entry, list_firmware_entries, remove_boot_entry, restore_boot_entries,
 };
 use crate::grub::generate_grub_cfg;
 use crate::iso::{scan_iso_dir, support_label};
@@ -93,6 +97,29 @@ enum Command {
         drive: String,
     },
     RecommendTestPartitions,
+    BootEntryList {
+        partboot_only: bool,
+        json: bool,
+    },
+    BootEntryCreate {
+        esp: PathBuf,
+        root: Option<PathBuf>,
+        label: String,
+        loader: Option<String>,
+        first: bool,
+        dry_run: bool,
+        json: bool,
+    },
+    BootEntryRemove {
+        id: String,
+        dry_run: bool,
+        json: bool,
+    },
+    BootEntryRestore {
+        backup: PathBuf,
+        dry_run: bool,
+        json: bool,
+    },
     Help,
 }
 
@@ -314,6 +341,185 @@ fn run(command: Command) -> Result<(), String> {
         Command::RecommendTestPartitions => {
             print_partition_recommendation();
         }
+        Command::BootEntryList { partboot_only, json } => {
+            let entries = list_firmware_entries(partboot_only)?;
+            if json {
+                let items: Vec<String> = entries
+                    .iter()
+                    .map(|entry| {
+                        format!(
+                            "{{\"kind\":\"{}\",\"id\":\"{}\",\"description\":\"{}\",\"device\":\"{}\",\"path\":\"{}\",\"order\":{}}}",
+                            json_escape(&entry.kind),
+                            json_escape(&entry.identifier),
+                            json_escape(entry.description.as_deref().unwrap_or("")),
+                            json_escape(entry.device.as_deref().unwrap_or("")),
+                            json_escape(entry.path.as_deref().unwrap_or("")),
+                            entry
+                                .display_order_index
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "null".to_string())
+                        )
+                    })
+                    .collect();
+                println!("{{\"entries\":[{}]}}", items.join(","));
+            } else if entries.is_empty() {
+                println!("[ok] no firmware application entries found");
+            } else {
+                println!("[ok] firmware boot entries:");
+                for entry in entries {
+                    println!(
+                        "- {} | {} | {} | {} | order={}",
+                        entry.identifier,
+                        entry.description.unwrap_or_else(|| "(no description)".to_string()),
+                        entry.path.unwrap_or_else(|| "(no path)".to_string()),
+                        entry.kind,
+                        entry
+                            .display_order_index
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "-".to_string())
+                    );
+                }
+            }
+        }
+        Command::BootEntryCreate {
+            esp,
+            root,
+            label,
+            loader,
+            first,
+            dry_run,
+            json,
+        } => {
+            let result = create_boot_entry(&esp, root.as_deref(), &label, loader.as_deref(), first, dry_run)?;
+            if json {
+                println!(
+                    "{{\"id\":\"{}\",\"label\":\"{}\",\"loader\":\"{}\",\"dry_run\":{},\"first\":{},\"reused\":{},\"secure_boot\":{},\"backup\":\"{}\"}}",
+                    json_escape(&result.identifier),
+                    json_escape(&result.label),
+                    json_escape(&result.loader),
+                    if result.dry_run { "true" } else { "false" },
+                    if result.added_first { "true" } else { "false" },
+                    if result.reused_existing { "true" } else { "false" },
+                    match result.secure_boot_enabled {
+                        Some(true) => "true",
+                        Some(false) => "false",
+                        None => "null",
+                    },
+                    json_escape(
+                        &result
+                            .backup_path
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().to_string())
+                            .unwrap_or_default()
+                    )
+                );
+            } else if result.dry_run {
+                println!("[ok] dry-run only; no firmware changes applied");
+                println!("label: {}", result.label);
+                println!("loader: {}", result.loader);
+                println!("placement: {}", if first { "first" } else { "last" });
+                println!(
+                    "secure boot: {}",
+                    match result.secure_boot_enabled {
+                        Some(true) => "enabled",
+                        Some(false) => "disabled",
+                        None => "unknown",
+                    }
+                );
+            } else {
+                if result.reused_existing {
+                    println!("[ok] reused existing firmware entry {}", result.identifier);
+                } else {
+                    println!("[ok] created firmware entry {}", result.identifier);
+                }
+                println!("label: {}", result.label);
+                println!("loader: {}", result.loader);
+                println!("placement: {}", if first { "first" } else { "last" });
+                println!(
+                    "secure boot: {}",
+                    match result.secure_boot_enabled {
+                        Some(true) => "enabled",
+                        Some(false) => "disabled",
+                        None => "unknown",
+                    }
+                );
+                if let Some(path) = result.backup_path {
+                    println!("backup: {}", path.display());
+                    println!("restore: bcdedit /import {}", path.display());
+                }
+            }
+        }
+        Command::BootEntryRemove { id, dry_run, json } => {
+            let result = remove_boot_entry(&id, dry_run)?;
+            if json {
+                println!(
+                    "{{\"id\":\"{}\",\"dry_run\":{},\"secure_boot\":{},\"backup\":\"{}\"}}",
+                    json_escape(&result.identifier),
+                    if result.dry_run { "true" } else { "false" },
+                    match result.secure_boot_enabled {
+                        Some(true) => "true",
+                        Some(false) => "false",
+                        None => "null",
+                    },
+                    json_escape(
+                        &result
+                            .backup_path
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().to_string())
+                            .unwrap_or_default()
+                    )
+                );
+            } else if result.dry_run {
+                println!("[ok] dry-run only; entry not removed");
+                println!("id: {}", result.identifier);
+                println!(
+                    "secure boot: {}",
+                    match result.secure_boot_enabled {
+                        Some(true) => "enabled",
+                        Some(false) => "disabled",
+                        None => "unknown",
+                    }
+                );
+            } else {
+                println!("[ok] removed firmware entry {}", result.identifier);
+                println!(
+                    "secure boot: {}",
+                    match result.secure_boot_enabled {
+                        Some(true) => "enabled",
+                        Some(false) => "disabled",
+                        None => "unknown",
+                    }
+                );
+                if let Some(path) = result.backup_path {
+                    println!("backup: {}", path.display());
+                    println!("restore: bcdedit /import {}", path.display());
+                }
+            }
+        }
+        Command::BootEntryRestore {
+            backup,
+            dry_run,
+            json,
+        } => {
+            let result = restore_boot_entries(&backup, dry_run)?;
+            if json {
+                println!(
+                    "{{\"backup\":\"{}\",\"dry_run\":{},\"secure_boot\":{}}}",
+                    json_escape(&result.backup_path.to_string_lossy()),
+                    if result.dry_run { "true" } else { "false" },
+                    match result.secure_boot_enabled {
+                        Some(true) => "true",
+                        Some(false) => "false",
+                        None => "null",
+                    }
+                );
+            } else if result.dry_run {
+                println!("[ok] dry-run only; backup not imported");
+                println!("backup: {}", result.backup_path.display());
+            } else {
+                println!("[ok] restored BCD store from {}", result.backup_path.display());
+            }
+        }
         Command::Help => print_help(),
     }
     Ok(())
@@ -388,7 +594,42 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
             drive: required_value(args, "--drive")?,
         }),
         "recommend-test-partitions" => Ok(Command::RecommendTestPartitions),
+        "boot-entry" => parse_boot_entry_command(args),
         command => Err(format!("unknown command '{command}'")),
+    }
+}
+
+fn parse_boot_entry_command(args: &[String]) -> Result<Command, String> {
+    let sub = args
+        .get(1)
+        .ok_or_else(|| "boot-entry requires a subcommand: list|create|remove".to_string())?;
+    match sub.as_str() {
+        "list" => Ok(Command::BootEntryList {
+            partboot_only: has_flag(args, "--partboot-only"),
+            json: has_flag(args, "--json"),
+        }),
+        "create" => Ok(Command::BootEntryCreate {
+            esp: required_path(args, "--esp")?,
+            root: optional_path(args, "--root"),
+            label: required_value(args, "--label")?,
+            loader: optional_value(args, "--loader"),
+            first: has_flag(args, "--first"),
+            dry_run: has_flag(args, "--dry-run"),
+            json: has_flag(args, "--json"),
+        }),
+        "remove" => Ok(Command::BootEntryRemove {
+            id: required_value(args, "--id")?,
+            dry_run: has_flag(args, "--dry-run"),
+            json: has_flag(args, "--json"),
+        }),
+        "restore" => Ok(Command::BootEntryRestore {
+            backup: required_path(args, "--backup")?,
+            dry_run: has_flag(args, "--dry-run"),
+            json: has_flag(args, "--json"),
+        }),
+        other => Err(format!(
+            "unknown boot-entry subcommand '{other}', expected list|create|remove|restore"
+        )),
     }
 }
 
@@ -2115,6 +2356,10 @@ fn print_help() {
     println!("  boot-instructions --esp <path>");
     println!("  doctor --root <path> [--esp <path>] [--json]");
     println!("  volume-id --drive <letter>");
+    println!("  boot-entry list [--partboot-only] [--json]");
+    println!("  boot-entry create --esp <path> --label <name> [--loader <esp-relative-efi-path> | --root <partboot-root>] [--first] [--dry-run] [--json]");
+    println!("  boot-entry remove --id <guid> [--dry-run] [--json]");
+    println!("  boot-entry restore --backup <path> [--dry-run] [--json]");
     println!("  recommend-test-partitions");
 }
 
@@ -2374,6 +2619,118 @@ mod tests {
             Command::StartInteractive {
                 include_diagnostics: true,
                 dry_run_install: true
+            }
+        );
+    }
+
+    #[test]
+    fn parse_boot_entry_list_command() {
+        let command = parse_command(&args(&["boot-entry", "list", "--partboot-only", "--json"])).unwrap();
+        assert_eq!(
+            command,
+            Command::BootEntryList {
+                partboot_only: true,
+                json: true
+            }
+        );
+    }
+
+    #[test]
+    fn parse_boot_entry_create_command() {
+        let command = parse_command(&args(&[
+            "boot-entry",
+            "create",
+            "--esp",
+            "S:/",
+            "--label",
+            "PartBoot",
+            "--loader",
+            "\\EFI\\PartBoot\\grubx64.efi",
+            "--first",
+            "--dry-run",
+            "--json",
+        ]))
+        .unwrap();
+        assert_eq!(
+            command,
+            Command::BootEntryCreate {
+                esp: PathBuf::from("S:/"),
+                root: None,
+                label: "PartBoot".to_string(),
+                loader: Some("\\EFI\\PartBoot\\grubx64.efi".to_string()),
+                first: true,
+                dry_run: true,
+                json: true
+            }
+        );
+    }
+
+    #[test]
+    fn parse_boot_entry_create_command_with_root() {
+        let command = parse_command(&args(&[
+            "boot-entry",
+            "create",
+            "--esp",
+            "S:/",
+            "--root",
+            "H:/partboot",
+            "--label",
+            "PartBoot",
+            "--dry-run",
+        ]))
+        .unwrap();
+        assert_eq!(
+            command,
+            Command::BootEntryCreate {
+                esp: PathBuf::from("S:/"),
+                root: Some(PathBuf::from("H:/partboot")),
+                label: "PartBoot".to_string(),
+                loader: None,
+                first: false,
+                dry_run: true,
+                json: false
+            }
+        );
+    }
+
+    #[test]
+    fn parse_boot_entry_remove_command() {
+        let command = parse_command(&args(&[
+            "boot-entry",
+            "remove",
+            "--id",
+            "{12345678-1234-1234-1234-123456789ABC}",
+            "--dry-run",
+            "--json",
+        ]))
+        .unwrap();
+        assert_eq!(
+            command,
+            Command::BootEntryRemove {
+                id: "{12345678-1234-1234-1234-123456789ABC}".to_string(),
+                dry_run: true,
+                json: true
+            }
+        );
+    }
+
+    #[test]
+    fn parse_boot_entry_restore_command() {
+        let command = parse_command(&args(&[
+            "boot-entry",
+            "restore",
+            "--backup",
+            "C:/temp/partboot-bcd-backup.bak",
+            "--dry-run",
+            "--json",
+        ]))
+        .unwrap();
+        assert_eq!(
+            command,
+            Command::BootEntryRestore {
+                backup: PathBuf::from("C:/temp/partboot-bcd-backup.bak"),
+                dry_run: true,
+                json: true
             }
         );
     }
