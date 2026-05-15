@@ -1,5 +1,19 @@
 # PartBoot MVP Implementation Plan
 
+## Status Audit (2026-05-15)
+
+Overall status: `Done`
+
+Task status:
+- [x] Task 1: Project scaffold and dependency-free CLI parser implemented.
+- [x] Task 2: Layout initializer implemented (`isos`, `profiles`, `cache`, `generated`, plus `extracted`).
+- [x] Task 3: ISO scanner and family classification implemented.
+- [x] Task 4: GRUB config generation implemented for core Linux families with unsupported-entry handling.
+- [x] Task 5: Safety and non-goal documentation present in user docs.
+
+Verification snapshot:
+- `cargo +stable-x86_64-pc-windows-gnu test` passes (36 tests).
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Build a safe first CLI slice that prepares a PartBoot ISO directory, scans ISO images, and generates a GRUB menu for booting supported Linux ISOs from a selected disk partition.

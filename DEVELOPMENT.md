@@ -144,33 +144,37 @@ The workflow skips prereleases and stale tags. It also supports manual backfill 
 
 ### ISO Extraction
 
-PartBoot uses 7-Zip to extract boot files:
+PartBoot uses 7-Zip (`7z`/`7za`) and candidate path matching to extract
+boot files from Linux ISOs into:
 
-| Family | Extracted paths |
-| --- | --- |
-| Ubuntu / Debian | `casper/{vmlinuz,initrd,filesystem.squashfs}` |
-| Arch | `arch/{boot,x86_64}` |
-| Fedora | `isolinux/{vmlinuz,initrd.img}` |
+```text
+partboot\extracted\<iso-id>\casper\
+  vmlinuz
+  initrd
+  filesystem.squashfs   (optional but preferred when available)
+```
 
-Extracted files are cached under `partboot\extracted\<iso-id>\`.
+If the standard candidates do not match, extraction falls back to scanning the
+ISO file list and choosing best matches dynamically.
 
 ### Boot Modes
 
-- `iso_toram`: copies the ISO into RAM before booting.
-- `iso_scan`: boots from the ISO stored on disk.
-- `extracted`: boots kernel, initrd, and filesystem files extracted to disk.
+- `iso_toram`: boots from loopback ISO with `toram noprompt`.
+- `extracted`: reserved in profile schema for extracted-first flows.
 
-The default profile uses `iso_toram` with hidden fallback entries unless `visible_fallback = true` is set in the profile.
+Current generated menu behavior uses the single ISO `toram` path for Ubuntu
+family entries. Extracted-first menu preference is planned but not active yet.
 
 ### Profiles
 
-Profiles are TOML files stored in `partboot\profiles\<iso-id>.toml`:
+Profiles are key-value files stored in `partboot\profiles\<iso-id>.profile`:
 
-```toml
-[boot]
-preferred_mode = "iso_toram"
-fallback_mode = "iso_scan"
-visible_fallback = false
+```text
+name=ubuntu-24.04.iso
+family=ubuntu
+preferred_mode=iso_toram
+fallback_mode=iso_toram
+visible_fallback=false
 ```
 
 Profiles are created automatically and repaired when stale or incomplete.
@@ -179,14 +183,16 @@ Profiles are created automatically and repaired when stale or incomplete.
 
 On startup, PartBoot resolves EFI binaries in this order:
 
-1. Bundled assets in `assets\efi` or `PARTBOOT_EFI_ASSETS`.
-2. Cached assets in the PartBoot root.
-3. Matching GitHub Release assets.
+1. Cached assets in `partboot\cache`.
+2. Bundled assets in `assets\efi` or `PARTBOOT_EFI_ASSETS`.
+3. Matching GitHub Release fallback assets.
 
-Checksums are validated before cached EFI assets are used.
+Checksums are validated before bundled or downloaded assets are copied into
+cache and used.
 
 ## Planning Documents
 
+- [Planning status index](docs/plans/README.md)
 - [MVP baseline](docs/plans/2026-05-08-partboot-mvp.md)
 - [Ubuntu shutdown fix](docs/plans/2026-05-07-shutdown-loop-fix.md)
 - [Phase 4 integration](docs/plans/2026-05-12-phase-4-platform-integration.md)

@@ -1,5 +1,16 @@
 # Phase 4: Platform Integration Kickoff
 
+## Status Audit (2026-05-15)
+
+Overall status: `Open (kickoff defined, core tasks not implemented yet)`
+
+Initial task status:
+1. [ ] `boot-entry list|create|remove` command contract with dry-run support.
+2. [ ] Read-only boot-entry listing followed by guarded create/remove paths.
+3. [~] Elevated-permission guidance exists in parts of CLI, but not for a dedicated boot-entry workflow.
+4. [ ] Rollback docs for entry-modification paths.
+5. [ ] Tests for boot-entry parsing and no-op safety behavior.
+
 ## Goal
 
 Start platform integration work so PartBoot can move from manual firmware selection to managed UEFI entry workflows with explicit safety checks.

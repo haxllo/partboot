@@ -1,5 +1,19 @@
 # Direction 6: Release & Packaging Plan
 
+## Status Audit (2026-05-15)
+
+Overall status: `Partial (implementation largely complete, final validation pending)`
+
+Task status:
+- [x] Task 1: Packaged layout defined under `assets/efi` and release bundle script.
+- [x] Task 2: Runtime resolver implemented (cache -> bundled assets -> release fallback download).
+- [x] Task 3: Checksum verification implemented (`checksums.txt` + CRC32 checks before copy/use).
+- [x] Task 4: Guided flow/start path wired through resolver with explicit error messaging.
+- [x] Task 5: Packaging automation and provenance/checksum checks implemented.
+
+Remaining:
+- [~] Clean-machine validation run and recorded release provenance for the final artifact set.
+
 ## Goal
 
 Make first-run setup work without manual cache preparation by bundling required EFI binaries in release artifacts, while keeping provenance and verification explicit.

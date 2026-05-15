@@ -90,6 +90,7 @@ Then reboot and select the PartBoot entry from the firmware boot menu.
 - [Usage Guide](docs/usage.md): command reference, supported ISO families, partition guidance, and troubleshooting.
 - [Developer Guide](DEVELOPMENT.md): build, test, release, and implementation notes.
 - [GRUB Strategy](docs/architecture/grub-strategy.md): EFI and GRUB architecture notes.
+- [Planning Status](docs/plans/README.md): implementation status for active and historical plan docs.
 - [Future Work](docs/future-work.md): known limitations and planned improvements.
 - [Contributing](CONTRIBUTING.md): contribution workflow and quality expectations.
 

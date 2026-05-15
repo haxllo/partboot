@@ -1,5 +1,24 @@
 # PartBoot Improvement Directions (12) + Direction 1 Plan
 
+## Status Audit (2026-05-15)
+
+Overall status: `Partial`
+
+Direction status snapshot:
+
+1. `UX & CLI ergonomics`: `Mostly done` (guided flow, `start`, standardized output, `--json` on key commands).
+2. `Safety & guardrails`: `Partial` (install force/dry-run and UUID checks exist; broader target-risk confirmations still open).
+3. `Boot compatibility & profiles`: `Partial` (family coverage improved; profile-driven menu behavior still incomplete).
+4. `Platform integration`: `Open/early` (no dedicated `boot-entry list|create|remove` command family yet).
+5. `Reliability, testing, and operations`: `Partial` (unit coverage is strong; end-to-end integration tests still open).
+6. `Release & packaging`: `Partial` (bundling/checksum/provenance automation implemented; final clean-machine validation pending).
+7. `Observability`: `Partial` (helpful runtime output exists; structured diagnostics bundle/export still open).
+8. `Performance`: `Partial` (cache reuse and extraction fallback improvements present; measured baselines still open).
+9. `Extensibility`: `Open` (extension contracts/generation tooling not yet formalized).
+10. `Recovery tooling`: `Partial` (manual fallback/install helpers exist; one-command restore/cleanup still open).
+11. `Documentation quality`: `Partial` (core docs improved; deeper decision trees/playbooks still open).
+12. `Governance & security`: `Open/partial` (checksum/provenance checks exist, broader security governance still open).
+
 ## Scope control rule (must follow)
 
 We will not expand scope beyond the 12 directions below until work planned under those directions is completed in order.  

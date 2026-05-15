@@ -1,5 +1,20 @@
 # Extracted Casper Implementation Plan
 
+## Status Audit (2026-05-15)
+
+Overall status: `Partial`
+
+Task status:
+- [x] Task 1: Layout includes `extracted` path and stable-path test coverage.
+- [x] Task 2: Extracted-id metadata and extracted completeness helpers implemented.
+- [x] Task 3: `extract` command implemented with 7-Zip candidate/fallback logic.
+- [ ] Task 4: GRUB currently does not prefer extracted entries; Ubuntu still boots via ISO `toram` path.
+- [~] Task 5: Regenerate/stage/install steps are operational/manual.
+- [~] Task 6: Boot behavior validation is operational/manual and distro-dependent.
+
+Code note:
+- The test `ubuntu_grub_entry_stays_single_even_when_extracted_exists` currently confirms extracted mode is not used in generated menu.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add an extracted Ubuntu Casper boot path so PartBoot can avoid whole-ISO `toram` boot when extracted live files are available.

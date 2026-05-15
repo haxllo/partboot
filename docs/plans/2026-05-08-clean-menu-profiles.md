@@ -1,5 +1,17 @@
 # Clean Menu And Profiles Implementation Plan
 
+## Status Audit (2026-05-15)
+
+Overall status: `Partial`
+
+Task status:
+- [x] Task 1: GRUB strategy documented in `docs/architecture/grub-strategy.md`.
+- [x] Task 2: Selectable `PartBoot ISO Manager` header entry removed.
+- [x] Task 3: Diagnostics made optional via `generate-menu --include-diagnostics`.
+- [~] Task 4: Profile files and parser exist, but profile-driven preferred/fallback menu generation is not active in `grub.rs`.
+- [x] Task 5: Doctor includes full NTFS UUID, extracted files, ESP/fallback, and profiles checks.
+- [~] Task 6: Regenerate/install/boot verification is operational/manual.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Keep the GRUB menu clean while making boot behavior explicit, repeatable, and scalable through PartBoot profiles.

@@ -1,5 +1,18 @@
 # Tailored GRUB Menu Implementation Plan
 
+## Status Audit (2026-05-15)
+
+Overall status: `Partial (partly superseded by clean-menu/profile direction)`
+
+Task status:
+- [~] Task 1: Header basics (colors/modules/default/timeout) implemented, but branded selectable title was intentionally removed later.
+- [ ] Task 2: Branded preferred/fallback entry labels not implemented in current generator.
+- [x] Task 3: Diagnostics entry exists and is optional via `--include-diagnostics`.
+- [~] Task 4: Regenerate/install verification is operational/manual (not persistently verifiable in repo).
+
+Supersession note:
+- Later planning moved menu UX toward cleaner default labels and profile-driven behavior.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Make the generated GRUB menu clearly branded for PartBoot, with preferred/fallback labels and diagnostics.

@@ -1,5 +1,17 @@
 # Shutdown Loop Fix Implementation Plan
 
+## Status Audit (2026-05-15)
+
+Overall status: `Partial (mostly done, later plans superseded Task 6 behavior)`
+
+Task status:
+- [x] Task 1: Root-cause troubleshooting guidance present in user docs.
+- [x] Task 2: Ubuntu default boot uses `toram noprompt`.
+- [x] Task 3: Experimental Ubuntu menu variants removed from default generated menu.
+- [~] Task 4: Regenerate/install test config is an operational step (manual, not persistently verifiable in repo).
+- [~] Task 5: Boot test and runtime RAM note are operational/manual.
+- [ ] Task 6: `extract` command exists, but extracted-first Ubuntu menu path was superseded by later clean-menu profile direction.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Make Ubuntu live-ISO boot default to the tested RAM-backed mode that avoids shutdown hangs caused by loop-backed ISO teardown.
