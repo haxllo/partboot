@@ -112,11 +112,39 @@ fn debian_entry(image: &IsoImage) -> String {
 
 fn arch_entry(image: &IsoImage) -> String {
     let iso = iso_grub_path(image);
+    let paths = arch_boot_paths(&image.name);
     format!(
-        "menuentry '{}' {{\n    set isofile='{}'\n    loopback loop ($partboot_root)$isofile\n    linux (loop)/arch/boot/x86_64/vmlinuz-linux img_dev=/dev/disk/by-uuid/$partboot_uuid img_loop=$isofile archisobasedir=arch\n    initrd (loop)/arch/boot/x86_64/initramfs-linux.img\n}}\n",
+        "menuentry '{}' {{\n    set isofile='{}'\n    loopback loop ($partboot_root)$isofile\n    linux (loop){} img_dev=/dev/disk/by-uuid/$partboot_uuid img_loop=$isofile archisobasedir=arch\n    initrd (loop){}\n}}\n",
         escape_grub(&image.name),
-        iso
+        iso,
+        paths.kernel,
+        paths.initrd
     )
+}
+
+struct ArchBootPaths {
+    kernel: &'static str,
+    initrd: &'static str,
+}
+
+fn arch_boot_paths(iso_name: &str) -> ArchBootPaths {
+    let lower = iso_name.to_ascii_lowercase();
+    if lower.contains("omarchy") {
+        return ArchBootPaths {
+            kernel: "/arch/boot/x86_64/vmlinuz-linux-t2",
+            initrd: "/arch/boot/x86_64/initramfs-linux-t2.img",
+        };
+    }
+    if lower.contains("cachyos") {
+        return ArchBootPaths {
+            kernel: "/arch/boot/x86_64/vmlinuz-linux-cachyos",
+            initrd: "/arch/boot/x86_64/initramfs-linux-cachyos.img",
+        };
+    }
+    ArchBootPaths {
+        kernel: "/arch/boot/x86_64/vmlinuz-linux",
+        initrd: "/arch/boot/x86_64/initramfs-linux.img",
+    }
 }
 
 fn fedora_entry(image: &IsoImage) -> String {
@@ -210,5 +238,48 @@ mod tests {
         assert!(cfg.contains("PartBoot diagnostics"));
         assert!(cfg.contains("partboot_uuid"));
         assert!(cfg.contains("partboot_root"));
+    }
+
+    #[test]
+    fn arch_grub_entry_uses_standard_arch_kernel_by_default() {
+        let image = IsoImage {
+            name: "archlinux-2026.01.01-x86_64.iso".to_string(),
+            path: PathBuf::from("X:/partboot/isos/archlinux-2026.01.01-x86_64.iso"),
+            family: IsoFamily::Arch,
+            support: SupportLevel::Supported,
+            extracted_id: None,
+        };
+        let cfg = generate_grub_cfg(&[image], "D826AD8826AD67E8", None, false, &[]);
+        assert!(cfg.contains("(loop)/arch/boot/x86_64/vmlinuz-linux "));
+        assert!(cfg.contains("(loop)/arch/boot/x86_64/initramfs-linux.img"));
+    }
+
+    #[test]
+    fn arch_grub_entry_supports_omarchy_kernel_names() {
+        let image = IsoImage {
+            name: "omarchy-3.2.3-2.iso".to_string(),
+            path: PathBuf::from("X:/partboot/isos/omarchy-3.2.3-2.iso"),
+            family: IsoFamily::Arch,
+            support: SupportLevel::Supported,
+            extracted_id: None,
+        };
+        let cfg = generate_grub_cfg(&[image], "D826AD8826AD67E8", None, false, &[]);
+        assert!(cfg.contains("(loop)/arch/boot/x86_64/vmlinuz-linux-t2 "));
+        assert!(cfg.contains("(loop)/arch/boot/x86_64/initramfs-linux-t2.img"));
+        assert!(cfg.contains("archisobasedir=arch"));
+    }
+
+    #[test]
+    fn arch_grub_entry_supports_cachyos_kernel_names() {
+        let image = IsoImage {
+            name: "cachyos-desktop-linux-250713.iso".to_string(),
+            path: PathBuf::from("X:/partboot/isos/cachyos-desktop-linux-250713.iso"),
+            family: IsoFamily::Arch,
+            support: SupportLevel::Supported,
+            extracted_id: None,
+        };
+        let cfg = generate_grub_cfg(&[image], "D826AD8826AD67E8", None, false, &[]);
+        assert!(cfg.contains("(loop)/arch/boot/x86_64/vmlinuz-linux-cachyos "));
+        assert!(cfg.contains("(loop)/arch/boot/x86_64/initramfs-linux-cachyos.img"));
     }
 }

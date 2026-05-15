@@ -95,7 +95,11 @@ pub fn classify_name(lower_name: &str) -> IsoFamily {
         IsoFamily::UbuntuCasper
     } else if lower_name.contains("debian") || lower_name.contains("kali") {
         IsoFamily::DebianLive
-    } else if lower_name.contains("archlinux") || lower_name.contains("endeavouros") {
+    } else if lower_name.contains("archlinux")
+        || lower_name.contains("endeavouros")
+        || lower_name.contains("omarchy")
+        || lower_name.contains("cachyos")
+    {
         IsoFamily::Arch
     } else if lower_name.contains("fedora") {
         IsoFamily::Fedora
@@ -122,6 +126,8 @@ mod tests {
     fn classify_known_iso_names() {
         assert_eq!(classify_name("ubuntu-24.04.iso"), IsoFamily::UbuntuCasper);
         assert_eq!(classify_name("archlinux-2026.iso"), IsoFamily::Arch);
+        assert_eq!(classify_name("omarchy-3.2.3-2.iso"), IsoFamily::Arch);
+        assert_eq!(classify_name("cachyos-desktop.iso"), IsoFamily::Arch);
         assert_eq!(classify_name("fedora-workstation.iso"), IsoFamily::Fedora);
         assert_eq!(classify_name("win11.iso"), IsoFamily::Windows);
         assert_eq!(classify_name("toolbox.iso"), IsoFamily::Unknown);
