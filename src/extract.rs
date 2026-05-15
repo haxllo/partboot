@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const EXTRACTED_FILES_REQUIRED: [&str; 2] = ["vmlinuz", "initrd"];
+const EXTRACTED_FILES_REQUIRED: [&str; 3] = ["vmlinuz", "initrd", "filesystem.squashfs"];
 
 // More robust candidate lists for different distro ISO layouts.
 const VMLINUZ_CANDIDATES: [&str; 7] = [
@@ -478,6 +478,9 @@ fn run_7z_extract_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::PartBootLayout;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn extracted_id_strips_iso_extension_and_sanitizes() {
@@ -504,5 +507,24 @@ mod tests {
         assert!(is_supported_linux_family(&IsoFamily::Fedora));
         assert!(!is_supported_linux_family(&IsoFamily::Windows));
         assert!(!is_supported_linux_family(&IsoFamily::Unknown));
+    }
+
+    #[test]
+    fn complete_extracted_requires_kernel_initrd_and_filesystem() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("partboot-extracted-test-{unique}"));
+        let layout = PartBootLayout::new(&root);
+        let extracted_id = "demo";
+        let casper = layout.extracted.join(extracted_id).join("casper");
+        fs::create_dir_all(&casper).unwrap();
+        fs::write(casper.join("vmlinuz"), b"k").unwrap();
+        fs::write(casper.join("initrd"), b"i").unwrap();
+        assert!(!is_complete_extracted(&layout, extracted_id));
+        fs::write(casper.join("filesystem.squashfs"), b"f").unwrap();
+        assert!(is_complete_extracted(&layout, extracted_id));
+        let _ = fs::remove_dir_all(&root);
     }
 }
