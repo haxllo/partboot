@@ -20,4 +20,4 @@ This index tracks implementation status for each plan document as of `2026-05-16
 | `2026-05-08-extracted-casper.md` | Partial | Extraction pipeline exists; GRUB does not yet prefer extracted boot entries. |
 | `2026-05-08-12-directions-and-ux-plan.md` | Partial | Direction 1 substantially complete; later directions are mixed partial/open. |
 | `2026-05-08-direction-6-release-packaging.md` | Partial | Bundling/checksum/release scripts implemented; clean-machine validation still pending. |
-| `2026-05-12-phase-4-platform-integration.md` | Done | `boot-entry` command family implemented with dry-run, backups, Secure Boot detection, rollback docs, and 30+ tests. |
+| `2026-05-12-phase-4-platform-integration.md` | Done | `entry` command family implemented with dry-run, backups, Secure Boot detection, rollback docs, and 30+ tests. |

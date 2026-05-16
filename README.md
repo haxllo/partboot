@@ -66,8 +66,8 @@ The wizard will:
 After reviewing the generated files, install them to an EFI System Partition:
 
 ```powershell
-partboot install-esp --root H:\partboot --esp S:\ --force
-partboot install-fallback --root H:\partboot --esp S:\ --force
+partboot esp --root H:\partboot --esp S:\ --force
+partboot fallback --root H:\partboot --esp S:\ --force
 ```
 
 Reboot and select the PartBoot entry from the firmware boot menu.
@@ -82,20 +82,20 @@ Reboot and select the PartBoot entry from the firmware boot menu.
 | `partboot init --root <path>` | Initialize a PartBoot root directory |
 | `partboot scan --root <path>` | Discover ISO images |
 | `partboot extract --root <path> --iso <name>` | Extract boot files from an ISO |
-| `partboot generate-menu --root <path> --partition-uuid <uuid>` | Generate GRUB configuration |
-| `partboot stage-efi --root <path> --grub-x64 <path>` | Stage EFI binaries |
-| `partboot install-esp --root <path> --esp <path> --force` | Install EFI files to the ESP |
+| `partboot menu --root <path> --uuid <uuid>` | Generate GRUB configuration |
+| `partboot stage --root <path> --grub-x64 <path>` | Stage EFI binaries |
+| `partboot esp --root <path> --esp <path> --force` | Install EFI files to the ESP |
 | `partboot doctor --root <path> [--esp <path>]` | Run health checks |
-| `partboot boot-instructions --esp <path>` | Show manual boot instructions |
+| `partboot boot --esp <path>` | Show manual boot instructions |
 
 ### Boot Entry Management
 
 | Command | Description |
 |---|---|
-| `partboot boot-entry list` | List firmware boot entries |
-| `partboot boot-entry create --esp <path> --label <name> --root <path>` | Create a UEFI boot entry |
-| `partboot boot-entry remove --id <guid>` | Remove a firmware boot entry |
-| `partboot boot-entry restore --backup <path>` | Restore a BCD backup |
+| `partboot entry list` | List firmware boot entries |
+| `partboot entry create --esp <path> --label <name> --root <path>` | Create a UEFI boot entry |
+| `partboot entry remove --id <guid>` | Remove a firmware boot entry |
+| `partboot entry restore --backup <path>` | Restore a BCD backup |
 
 ### Common Flags
 
@@ -103,14 +103,13 @@ Reboot and select the PartBoot entry from the firmware boot menu.
 |---|---|
 | `--json` | Machine-readable output |
 | `--dry-run` | Validate inputs without making changes |
-| `--dry-run-install` | Preview install steps without modifying files |
-| `--skip-boot-entry` | Skip firmware boot entry creation |
-| `--include-diagnostics` | Add a diagnostics entry to the GRUB menu |
+| `--skip-entry` | Skip firmware boot entry creation |
+| `--diagnostics` | Add a diagnostics entry to the GRUB menu |
 | `-h, --help` | Display help |
 | `-V, --version` | Display version |
 
 > [!TIP]
-> Get per-command help with `partboot <command> --help` or `partboot boot-entry <subcommand> --help`.
+> Get per-command help with `partboot <command> --help` or `partboot entry <subcommand> --help`.
 
 ## Scripted Workflow
 
