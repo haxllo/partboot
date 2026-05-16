@@ -147,13 +147,17 @@ fn run_7z_list_with(program: &str, iso_path: &Path) -> Result<Vec<String>, Seven
         .arg("-slt")
         .arg(iso_path)
         .output()
-        .map_err(|error| SevenZipError::Spawn(format!("{} ({})", program, error.to_string().trim())))?;
+        .map_err(|error| {
+            SevenZipError::Spawn(format!("{} ({})", program, error.to_string().trim()))
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let message = if stderr.is_empty() { stdout } else { stderr };
-        return Err(SevenZipError::Run(format!("7z failed listing ISO: {message}")));
+        return Err(SevenZipError::Run(format!(
+            "7z failed listing ISO: {message}"
+        )));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -175,7 +179,10 @@ fn list_iso_entries(iso_path: &Path) -> Result<Vec<String>, String> {
             Err(SevenZipError::Run(err)) => return Err(err),
         }
     }
-    Err(format!("failed to run 7z list. Attempts: {}", spawn_errors.join("; ")))
+    Err(format!(
+        "failed to run 7z list. Attempts: {}",
+        spawn_errors.join("; ")
+    ))
 }
 
 fn score_match(path: &str, candidate: &str) -> i32 {
@@ -207,7 +214,11 @@ fn find_best_entry(entries: &[String], candidates: &[&str]) -> Option<String> {
                 .file_name()
                 .and_then(|s| s.to_str())
                 .unwrap_or(cand);
-            if entry.to_lowercase().ends_with(&cand_basename.to_lowercase()) || entry.to_lowercase().contains(&cand_basename.to_lowercase()) {
+            if entry
+                .to_lowercase()
+                .ends_with(&cand_basename.to_lowercase())
+                || entry.to_lowercase().contains(&cand_basename.to_lowercase())
+            {
                 let sc = score_match(entry, cand_basename);
                 if best.as_ref().map(|(s, _)| sc > *s).unwrap_or(true) {
                     best = Some((sc, entry.clone()));
@@ -222,7 +233,13 @@ fn dynamic_scan_and_extract(iso_path: &Path, destination: &Path) -> Result<bool,
     let entries = list_iso_entries(iso_path)?;
 
     let v_basenames = ["vmlinuz", "kernel"];
-    let i_basenames = ["initrd.img", "initrd.lz", "initrd.gz", "initrd", "initramfs"];
+    let i_basenames = [
+        "initrd.img",
+        "initrd.lz",
+        "initrd.gz",
+        "initrd",
+        "initramfs",
+    ];
     let s_basenames = [
         "filesystem.squashfs",
         "filesystem.squash",
@@ -274,11 +291,15 @@ fn dynamic_scan_and_extract(iso_path: &Path, destination: &Path) -> Result<bool,
 
     let v_best = find_best_entry(&entries, &v_basenames);
     let v_ok = do_extract(v_best, "vmlinuz")?;
-    if !v_ok { all_ok = false; }
+    if !v_ok {
+        all_ok = false;
+    }
 
     let i_best = find_best_entry(&entries, &i_basenames);
     let i_ok = do_extract(i_best, "initrd")?;
-    if !i_ok { all_ok = false; }
+    if !i_ok {
+        all_ok = false;
+    }
 
     let s_best = find_best_entry(&entries, &s_basenames);
     let _ = do_extract(s_best, "filesystem.squashfs")?;
@@ -309,37 +330,63 @@ pub fn extract_casper(layout: &PartBootLayout, iso_arg: &str) -> Result<String, 
 
     // Extract vmlinuz
     match try_extract_candidates(&iso_path, &VMLINUZ_CANDIDATES, &destination, "vmlinuz") {
-        Ok(true) => {},
+        Ok(true) => {}
         Ok(false) => missing.push("vmlinuz"),
         Err(e) => {
             spinner.finish_error(&format!("extraction failed: {}", e));
-            return Err(format!("Extraction error: {}\n• Check if ISO file is corrupted", e));
+            return Err(format!(
+                "Extraction error: {}\n• Check if ISO file is corrupted",
+                e
+            ));
         }
     }
 
     // Extract initrd
     match try_extract_candidates(&iso_path, &INITRD_CANDIDATES, &destination, "initrd") {
-        Ok(true) => {},
+        Ok(true) => {}
         Ok(false) => missing.push("initrd"),
         Err(e) => {
             spinner.finish_error(&format!("extraction failed: {}", e));
-            return Err(format!("Extraction error: {}\n• Check if ISO file is corrupted", e));
+            return Err(format!(
+                "Extraction error: {}\n• Check if ISO file is corrupted",
+                e
+            ));
         }
     }
 
     // Extract filesystem
-    let _ = try_extract_candidates(&iso_path, &ROOTFS_CANDIDATES, &destination, "filesystem.squashfs")
-        .map_err(|e| e.to_string())?;
+    let _ = try_extract_candidates(
+        &iso_path,
+        &ROOTFS_CANDIDATES,
+        &destination,
+        "filesystem.squashfs",
+    )
+    .map_err(|e| e.to_string())?;
 
     // If initial candidate extraction failed for any file, run dynamic scanner as a fallback.
     if !is_complete_extracted(layout, &extracted_id) {
         match dynamic_scan_and_extract(&iso_path, &destination) {
             Ok(true) => {
                 spinner.finish(&format!("Extraction complete ({})", iso_name));
-                let vmlinuz_path = destination.join("vmlinuz").exists().then(|| "vmlinuz".to_string());
-                let initrd_path = destination.join("initrd").exists().then(|| "initrd".to_string());
-                let rootfs_path = destination.join("filesystem.squashfs").exists().then(|| "filesystem.squashfs".to_string());
-                let _ = cache::save_to_cache(&iso_path, vmlinuz_path, initrd_path, rootfs_path, "Linux".to_string());
+                let vmlinuz_path = destination
+                    .join("vmlinuz")
+                    .exists()
+                    .then(|| "vmlinuz".to_string());
+                let initrd_path = destination
+                    .join("initrd")
+                    .exists()
+                    .then(|| "initrd".to_string());
+                let rootfs_path = destination
+                    .join("filesystem.squashfs")
+                    .exists()
+                    .then(|| "filesystem.squashfs".to_string());
+                let _ = cache::save_to_cache(
+                    &iso_path,
+                    vmlinuz_path,
+                    initrd_path,
+                    rootfs_path,
+                    "Linux".to_string(),
+                );
                 return Ok(extracted_id);
             }
             Ok(false) => {
@@ -353,11 +400,19 @@ pub fn extract_casper(layout: &PartBootLayout, iso_arg: &str) -> Result<String, 
                     "• core extraction files missing"
                 };
                 spinner.finish_error(&format!("extraction incomplete for {}", iso_name));
-                return Err(format!("Extraction failed for {}.\nMissing: {}\n\nTroubleshoot:\n{}", extracted_id, missing.join(", "), hint));
+                return Err(format!(
+                    "Extraction failed for {}.\nMissing: {}\n\nTroubleshoot:\n{}",
+                    extracted_id,
+                    missing.join(", "),
+                    hint
+                ));
             }
             Err(e) => {
                 spinner.finish_error(&format!("extraction failed: {}", e));
-                return Err(format!("Extraction error: {}\n• Check if ISO file is corrupted", e));
+                return Err(format!(
+                    "Extraction error: {}\n• Check if ISO file is corrupted",
+                    e
+                ));
             }
         }
     }
@@ -373,17 +428,37 @@ pub fn extract_casper(layout: &PartBootLayout, iso_arg: &str) -> Result<String, 
             "• core extraction files missing"
         };
         spinner.finish_error(&format!("extraction incomplete for {}", iso_name));
-        return Err(format!("Extraction failed for {}.\nMissing: {}\n\nTroubleshoot:\n{}", extracted_id, missing.join(", "), hint));
+        return Err(format!(
+            "Extraction failed for {}.\nMissing: {}\n\nTroubleshoot:\n{}",
+            extracted_id,
+            missing.join(", "),
+            hint
+        ));
     }
 
     spinner.finish(&format!("Extraction complete ({})", iso_name));
 
     // Save to cache after successful extraction
-    let vmlinuz_path = destination.join("vmlinuz").exists().then(|| "vmlinuz".to_string());
-    let initrd_path = destination.join("initrd").exists().then(|| "initrd".to_string());
-    let rootfs_path = destination.join("filesystem.squashfs").exists().then(|| "filesystem.squashfs".to_string());
+    let vmlinuz_path = destination
+        .join("vmlinuz")
+        .exists()
+        .then(|| "vmlinuz".to_string());
+    let initrd_path = destination
+        .join("initrd")
+        .exists()
+        .then(|| "initrd".to_string());
+    let rootfs_path = destination
+        .join("filesystem.squashfs")
+        .exists()
+        .then(|| "filesystem.squashfs".to_string());
 
-    let _ = cache::save_to_cache(&iso_path, vmlinuz_path, initrd_path, rootfs_path, "Linux".to_string());
+    let _ = cache::save_to_cache(
+        &iso_path,
+        vmlinuz_path,
+        initrd_path,
+        rootfs_path,
+        "Linux".to_string(),
+    );
 
     Ok(extracted_id)
 }

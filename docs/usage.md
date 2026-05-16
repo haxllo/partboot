@@ -181,6 +181,125 @@ Print safe test-partition guidance.
 partboot recommend-test-partitions
 ```
 
+### `boot-entry list`
+
+List firmware boot entries. Use `--partboot-only` to show only PartBoot-managed entries.
+
+```powershell
+partboot boot-entry list
+partboot boot-entry list --partboot-only
+partboot boot-entry list --json
+```
+
+### `boot-entry create`
+
+Create a new UEFI firmware boot entry. Requires an elevated (Administrator) shell unless `--dry-run` is used.
+
+```powershell
+partboot boot-entry create --esp S:\ --root H:\partboot --label "PartBoot" --dry-run
+partboot boot-entry create --esp S:\ --root H:\partboot --label "PartBoot" --first
+partboot boot-entry create --esp S:\ --loader \EFI\PartBoot\grubx64.efi --label "PartBoot" --dry-run
+```
+
+Flags:
+
+- `--esp`: EFI system partition path (required).
+- `--root`: PartBoot root directory; auto-resolves the loader to `\EFI\PartBoot\grubx64.efi`.
+- `--loader`: Explicit ESP-relative loader path (alternative to `--root`).
+- `--label`: Human-readable entry name (required).
+- `--first`: Add entry to the top of the boot order (default: last).
+- `--dry-run`: Validate inputs without modifying firmware.
+- `--json`: Machine-readable output.
+
+Safety behavior:
+
+- Before any modification, the full BCD store is exported to `%TEMP%\partboot-bcd-backup-<timestamp>.bak`.
+- If an entry with the same label and loader already exists, it is reused instead of duplicated.
+- Secure Boot state is detected and reported in the output.
+- The command fails if not run as Administrator (unless `--dry-run`).
+
+### `boot-entry remove`
+
+Remove a firmware boot entry by its GUID identifier. Requires an elevated shell unless `--dry-run` is used.
+
+```powershell
+partboot boot-entry remove --id "{12345678-1234-1234-1234-123456789ABC}" --dry-run
+partboot boot-entry remove --id "{12345678-1234-1234-1234-123456789ABC}"
+```
+
+Safety behavior:
+
+- Protected identifiers (`{bootmgr}`, `{fwbootmgr}`, `{current}`, `{default}`, `{memdiag}`) cannot be removed.
+- The BCD store is backed up before removal.
+- The identifier must be a valid GUID wrapped in braces.
+
+### `boot-entry restore`
+
+Restore a previously exported BCD backup. Requires an elevated shell unless `--dry-run` is used.
+
+```powershell
+partboot boot-entry restore --backup C:\Users\Me\AppData\Local\Temp\partboot-bcd-backup-1715000000.bak --dry-run
+partboot boot-entry restore --backup C:\Users\Me\AppData\Local\Temp\partboot-bcd-backup-1715000000.bak
+```
+
+## Boot Entry Rollback
+
+Every `boot-entry create` and `boot-entry remove` operation exports a full BCD backup before making changes. The backup path is printed in the command output and included in JSON results.
+
+### Rollback after `boot-entry create`
+
+If the created entry causes boot issues:
+
+```powershell
+# 1. List current entries to confirm the problematic entry
+partboot boot-entry list --partboot-only
+
+# 2. Restore the pre-create BCD backup
+partboot boot-entry restore --backup <backup-path-from-create-output>
+
+# 3. Verify restoration
+partboot boot-entry list --partboot-only
+```
+
+Or manually with bcdedit:
+
+```powershell
+bcdedit /import <backup-path-from-create-output>
+```
+
+### Rollback after `boot-entry remove`
+
+If an entry was removed by mistake:
+
+```powershell
+# 1. Restore the pre-remove BCD backup
+partboot boot-entry restore --backup <backup-path-from-remove-output>
+
+# 2. Verify the entry is back
+partboot boot-entry list --partboot-only
+```
+
+### Manual rollback with bcdedit
+
+If the `partboot boot-entry restore` command is unavailable:
+
+```powershell
+# Must be run from an elevated Command Prompt or PowerShell
+bcdedit /import "C:\path\to\partboot-bcd-backup-<timestamp>.bak"
+```
+
+### Emergency recovery
+
+If the BCD store is corrupted and no backup is available:
+
+```powershell
+# Rebuild the BCD store from an elevated recovery environment
+bootrec /rebuildbcd
+bootrec /fixboot
+```
+
+Always keep the backup files printed by `boot-entry create` and `boot-entry remove` until you have confirmed the system boots correctly with the new configuration.
+
 ## Supported ISO Families
 
 Generated GRUB entries are supported for:

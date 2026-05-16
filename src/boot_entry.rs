@@ -110,11 +110,12 @@ pub fn create_boot_entry(
         let identifier = if let Some(existing_id) = existing {
             existing_id
         } else {
-            let copy_output = run_bcdedit(&["/copy", "{bootmgr}", "/d", label])?;
-            parse_copied_identifier(&copy_output).ok_or_else(|| {
+            let create_output =
+                run_bcdedit(&["/create", "/d", label, "/application", "BOOTSECTOR"])?;
+            parse_copied_identifier(&create_output).ok_or_else(|| {
                 format!(
                     "failed to parse new boot-entry GUID from bcdedit output: {}",
-                    copy_output.trim()
+                    create_output.trim()
                 )
             })?
         };
@@ -124,9 +125,21 @@ pub fn create_boot_entry(
         run_bcdedit(&["/set", &identifier, "device", &device_value])?;
         run_bcdedit(&["/set", &identifier, "path", &loader])?;
         if add_first {
-            run_bcdedit(&["/set", "{fwbootmgr}", "displayorder", &identifier, "/addfirst"])?;
+            run_bcdedit(&[
+                "/set",
+                "{fwbootmgr}",
+                "displayorder",
+                &identifier,
+                "/addfirst",
+            ])?;
         } else {
-            run_bcdedit(&["/set", "{fwbootmgr}", "displayorder", &identifier, "/addlast"])?;
+            run_bcdedit(&[
+                "/set",
+                "{fwbootmgr}",
+                "displayorder",
+                &identifier,
+                "/addlast",
+            ])?;
         }
 
         Ok(CreateBootEntryResult {
@@ -177,7 +190,10 @@ pub fn remove_boot_entry(identifier: &str, dry_run: bool) -> Result<RemoveBootEn
     }
 }
 
-pub fn restore_boot_entries(backup_path: &Path, dry_run: bool) -> Result<RestoreBootEntryResult, String> {
+pub fn restore_boot_entries(
+    backup_path: &Path,
+    dry_run: bool,
+) -> Result<RestoreBootEntryResult, String> {
     #[cfg(not(windows))]
     {
         let _ = (backup_path, dry_run);
@@ -188,7 +204,10 @@ pub fn restore_boot_entries(backup_path: &Path, dry_run: bool) -> Result<Restore
     {
         ensure_windows_uefi()?;
         if !backup_path.exists() {
-            return Err(format!("backup file does not exist: {}", backup_path.display()));
+            return Err(format!(
+                "backup file does not exist: {}",
+                backup_path.display()
+            ));
         }
         let secure_boot = secure_boot_state();
         if dry_run {
@@ -382,6 +401,11 @@ fn run_bcdedit(args: &[&str]) -> Result<String, String> {
 
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if !stdout.is_empty() && !stderr.to_ascii_lowercase().contains("access is denied") {
+        return Ok(format!("{stdout}\n"));
+    }
+
     let details = if !stderr.is_empty() { stderr } else { stdout };
     Err(format!("bcdedit {} failed: {}", args.join(" "), details))
 }
@@ -401,11 +425,16 @@ fn ensure_admin() -> Result<(), String> {
         ])
         .output()
         .map_err(|error| format!("failed to run admin-check command: {error}"))?;
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_ascii_lowercase();
+    let value = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .to_ascii_lowercase();
     if output.status.success() && value == "true" {
         Ok(())
     } else {
-        Err("boot-entry create/remove requires an elevated shell (Run as Administrator)".to_string())
+        Err(
+            "boot-entry create/remove requires an elevated shell (Run as Administrator)"
+                .to_string(),
+        )
     }
 }
 
@@ -428,7 +457,9 @@ fn normalize_loader_path(loader: &str) -> Result<String, String> {
         return Err("loader path cannot be empty".to_string());
     }
     if trimmed.contains(':') {
-        return Err("loader must be an ESP-relative path like \\EFI\\PartBoot\\grubx64.efi".to_string());
+        return Err(
+            "loader must be an ESP-relative path like \\EFI\\PartBoot\\grubx64.efi".to_string(),
+        );
     }
     let mut normalized = trimmed.replace('/', "\\");
     if !normalized.starts_with('\\') {
@@ -463,9 +494,17 @@ fn validate_removable_identifier(identifier: &str) -> Result<(), String> {
     if !id.starts_with('{') || !id.ends_with('}') {
         return Err("identifier must look like {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}".to_string());
     }
-    let protected = ["{bootmgr}", "{fwbootmgr}", "{current}", "{default}", "{memdiag}"];
+    let protected = [
+        "{bootmgr}",
+        "{fwbootmgr}",
+        "{current}",
+        "{default}",
+        "{memdiag}",
+    ];
     if protected.iter().any(|value| *value == id) {
-        return Err(format!("refusing to remove protected identifier {identifier}"));
+        return Err(format!(
+            "refusing to remove protected identifier {identifier}"
+        ));
     }
     Ok(())
 }
@@ -482,7 +521,7 @@ fn export_bcd_backup() -> Result<PathBuf, String> {
 }
 
 #[cfg(windows)]
-fn secure_boot_state() -> Option<bool> {
+pub fn secure_boot_state() -> Option<bool> {
     let output = Command::new("powershell")
         .args(["-NoProfile", "-Command", "Confirm-SecureBootUEFI"])
         .output()
@@ -555,5 +594,258 @@ displayorder            {bootmgr}\n\
                 "{22222222-2222-2222-2222-222222222222}".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn parse_copied_identifier_returns_none_for_missing_guid() {
+        assert_eq!(parse_copied_identifier("no guid here"), None);
+    }
+
+    #[test]
+    fn parse_copied_identifier_returns_none_for_short_guid() {
+        assert_eq!(parse_copied_identifier("{a}"), None);
+    }
+
+    #[test]
+    fn parse_copied_identifier_handles_multiline_output() {
+        let sample = "Some header line\nThe entry was successfully copied to {aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}.\nDone.";
+        assert_eq!(
+            parse_copied_identifier(sample),
+            Some("{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_firmware_entries_returns_empty_for_empty_input() {
+        assert!(parse_firmware_entries("").is_empty());
+    }
+
+    #[test]
+    fn parse_firmware_entries_skips_fwbootmgr() {
+        let sample = "\
+Firmware Boot Manager\n\
+---------------------\n\
+identifier              {fwbootmgr}\n\
+displayorder            {bootmgr}\n";
+        assert!(parse_firmware_entries(sample).is_empty());
+    }
+
+    #[test]
+    fn parse_firmware_entries_handles_multiple_entries() {
+        let sample = "\
+Firmware Boot Manager\n\
+---------------------\n\
+identifier              {fwbootmgr}\n\
+displayorder            {bootmgr}\n\
+\n\
+Firmware Application (101fffff)\n\
+-------------------------------\n\
+identifier              {11111111-1111-1111-1111-111111111111}\n\
+description             Ubuntu\n\
+path                    \\EFI\\UBUNTU\\SHIMX64.EFI\n\
+\n\
+Firmware Application (101fffff)\n\
+-------------------------------\n\
+identifier              {22222222-2222-2222-2222-222222222222}\n\
+description             Windows Boot Manager\n\
+path                    \\EFI\\MICROSOFT\\BOOT\\BOOTMGFW.EFI\n";
+        let entries = parse_firmware_entries(sample);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].description, Some("Ubuntu".to_string()));
+        assert_eq!(
+            entries[1].description,
+            Some("Windows Boot Manager".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_firmware_entries_handles_missing_optional_fields() {
+        let sample = "\
+Firmware Application (101fffff)\n\
+-------------------------------\n\
+identifier              {11111111-1111-1111-1111-111111111111}\n";
+        let entries = parse_firmware_entries(sample);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].description, None);
+        assert_eq!(entries[0].device, None);
+        assert_eq!(entries[0].path, None);
+    }
+
+    #[test]
+    fn parse_firmware_entries_skips_blocks_without_identifier() {
+        let sample = "\
+Some random header\n\
+--------------------\n\
+description             No ID here\n\
+\n\
+Firmware Application (101fffff)\n\
+-------------------------------\n\
+identifier              {11111111-1111-1111-1111-111111111111}\n\
+description             Valid entry\n";
+        let entries = parse_firmware_entries(sample);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].description, Some("Valid entry".to_string()));
+    }
+
+    #[test]
+    fn parse_firmware_entries_assigns_display_order_index() {
+        let sample = "\
+Firmware Boot Manager\n\
+---------------------\n\
+identifier              {fwbootmgr}\n\
+displayorder            {bootmgr}\n\
+                        {aaaa}\n\
+                        {bbbb}\n\
+\n\
+Firmware Application (101fffff)\n\
+-------------------------------\n\
+identifier              {aaaa}\n\
+description             First\n\
+\n\
+Firmware Application (101fffff)\n\
+-------------------------------\n\
+identifier              {bbbb}\n\
+description             Second\n";
+        let entries = parse_firmware_entries(sample);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].display_order_index, Some(1));
+        assert_eq!(entries[1].display_order_index, Some(2));
+    }
+
+    #[test]
+    fn parse_fw_display_order_returns_empty_for_no_fwbootmgr() {
+        let sample = "\
+Firmware Application (101fffff)\n\
+-------------------------------\n\
+identifier              {aaaa}\n";
+        assert!(parse_fw_display_order(sample).is_empty());
+    }
+
+    #[test]
+    fn parse_fw_display_order_returns_empty_for_no_displayorder_line() {
+        let sample = "\
+Firmware Boot Manager\n\
+---------------------\n\
+identifier              {fwbootmgr}\n";
+        assert!(parse_fw_display_order(sample).is_empty());
+    }
+
+    #[test]
+    fn extract_braced_ids_returns_empty_for_no_braces() {
+        assert!(extract_braced_ids("no braces here").is_empty());
+    }
+
+    #[test]
+    fn extract_braced_ids_handles_multiple_on_one_line() {
+        let result = extract_braced_ids("displayorder {a} {b} {c}");
+        assert_eq!(
+            result,
+            vec!["{a}".to_string(), "{b}".to_string(), "{c}".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_braced_ids_handles_unclosed_brace() {
+        let result = extract_braced_ids("text {open no close");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn value_after_key_returns_none_when_key_not_at_start() {
+        assert!(value_after_key("  identifier  {abc}", "identifier").is_none());
+    }
+
+    #[test]
+    fn value_after_key_returns_none_for_empty_value() {
+        assert!(value_after_key("identifier", "identifier").is_none());
+    }
+
+    #[test]
+    fn value_after_key_returns_trimmed_value() {
+        assert_eq!(
+            value_after_key("identifier    {abc}  ", "identifier"),
+            Some("{abc}")
+        );
+    }
+
+    #[test]
+    fn validate_removable_identifier_rejects_plain_text() {
+        let result = validate_removable_identifier("not-a-guid");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must look like"));
+    }
+
+    #[test]
+    fn validate_removable_identifier_rejects_protected_bootmgr() {
+        let result = validate_removable_identifier("{bootmgr}");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("protected"));
+    }
+
+    #[test]
+    fn validate_removable_identifier_rejects_protected_fwbootmgr() {
+        let result = validate_removable_identifier("{fwbootmgr}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_removable_identifier_rejects_protected_current() {
+        let result = validate_removable_identifier("{current}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_removable_identifier_rejects_protected_default() {
+        let result = validate_removable_identifier("{default}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_removable_identifier_rejects_protected_memdiag() {
+        let result = validate_removable_identifier("{memdiag}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_removable_identifier_accepts_valid_guid() {
+        let result = validate_removable_identifier("{12345678-1234-1234-1234-123456789ABC}");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_removable_identifier_is_case_insensitive() {
+        let result = validate_removable_identifier("{BOOTMGR}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn normalize_loader_path_converts_forward_slashes() {
+        let result = normalize_loader_path("/EFI/PartBoot/grubx64.efi");
+        assert_eq!(result.unwrap(), "\\EFI\\PartBoot\\grubx64.efi");
+    }
+
+    #[test]
+    fn normalize_loader_path_adds_leading_backslash() {
+        let result = normalize_loader_path("EFI\\PartBoot\\grubx64.efi");
+        assert_eq!(result.unwrap(), "\\EFI\\PartBoot\\grubx64.efi");
+    }
+
+    #[test]
+    fn normalize_loader_path_rejects_drive_letter() {
+        let result = normalize_loader_path("C:\\EFI\\grubx64.efi");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("ESP-relative"));
+    }
+
+    #[test]
+    fn normalize_loader_path_rejects_empty() {
+        let result = normalize_loader_path("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn normalize_loader_path_preserves_already_correct_path() {
+        let result = normalize_loader_path("\\EFI\\PartBoot\\grubx64.efi");
+        assert_eq!(result.unwrap(), "\\EFI\\PartBoot\\grubx64.efi");
     }
 }

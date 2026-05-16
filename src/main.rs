@@ -1,17 +1,17 @@
-mod extract;
 mod boot_entry;
+mod cache;
+mod extract;
 mod grub;
 mod iso;
 mod layout;
 mod profile;
-mod cache;
 mod spinner;
 
-use crate::extract::{
-    extract_casper, is_complete_extracted, is_supported_linux_family, mark_extracted_images,
-};
 use crate::boot_entry::{
     create_boot_entry, list_firmware_entries, remove_boot_entry, restore_boot_entries,
+};
+use crate::extract::{
+    extract_casper, is_complete_extracted, is_supported_linux_family, mark_extracted_images,
 };
 use crate::grub::generate_grub_cfg;
 use crate::iso::{scan_iso_dir, support_label};
@@ -92,6 +92,7 @@ enum Command {
     StartInteractive {
         include_diagnostics: bool,
         dry_run_install: bool,
+        skip_boot_entry: bool,
     },
     VolumeId {
         drive: String,
@@ -332,8 +333,9 @@ fn run(command: Command) -> Result<(), String> {
         Command::StartInteractive {
             include_diagnostics,
             dry_run_install,
+            skip_boot_entry,
         } => {
-            run_start_interactive(include_diagnostics, dry_run_install)?;
+            run_start_interactive(include_diagnostics, dry_run_install, skip_boot_entry)?;
         }
         Command::VolumeId { drive } => {
             print_volume_id(&drive)?;
@@ -341,7 +343,10 @@ fn run(command: Command) -> Result<(), String> {
         Command::RecommendTestPartitions => {
             print_partition_recommendation();
         }
-        Command::BootEntryList { partboot_only, json } => {
+        Command::BootEntryList {
+            partboot_only,
+            json,
+        } => {
             let entries = list_firmware_entries(partboot_only)?;
             if json {
                 let items: Vec<String> = entries
@@ -370,7 +375,9 @@ fn run(command: Command) -> Result<(), String> {
                     println!(
                         "- {} | {} | {} | {} | order={}",
                         entry.identifier,
-                        entry.description.unwrap_or_else(|| "(no description)".to_string()),
+                        entry
+                            .description
+                            .unwrap_or_else(|| "(no description)".to_string()),
                         entry.path.unwrap_or_else(|| "(no path)".to_string()),
                         entry.kind,
                         entry
@@ -390,7 +397,14 @@ fn run(command: Command) -> Result<(), String> {
             dry_run,
             json,
         } => {
-            let result = create_boot_entry(&esp, root.as_deref(), &label, loader.as_deref(), first, dry_run)?;
+            let result = create_boot_entry(
+                &esp,
+                root.as_deref(),
+                &label,
+                loader.as_deref(),
+                first,
+                dry_run,
+            )?;
             if json {
                 println!(
                     "{{\"id\":\"{}\",\"label\":\"{}\",\"loader\":\"{}\",\"dry_run\":{},\"first\":{},\"reused\":{},\"secure_boot\":{},\"backup\":\"{}\"}}",
@@ -517,7 +531,10 @@ fn run(command: Command) -> Result<(), String> {
                 println!("[ok] dry-run only; backup not imported");
                 println!("backup: {}", result.backup_path.display());
             } else {
-                println!("[ok] restored BCD store from {}", result.backup_path.display());
+                println!(
+                    "[ok] restored BCD store from {}",
+                    result.backup_path.display()
+                );
             }
         }
         Command::Help => print_help(),
@@ -589,6 +606,7 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
         "start" => Ok(Command::StartInteractive {
             include_diagnostics: has_flag(args, "--include-diagnostics"),
             dry_run_install: has_flag(args, "--dry-run-install"),
+            skip_boot_entry: has_flag(args, "--skip-boot-entry"),
         }),
         "volume-id" => Ok(Command::VolumeId {
             drive: required_value(args, "--drive")?,
@@ -673,7 +691,10 @@ fn ui_runtime() -> &'static Mutex<UiRuntimeState> {
 }
 
 fn ui_is_fullscreen() -> bool {
-    ui_runtime().lock().map(|state| state.fullscreen).unwrap_or(false)
+    ui_runtime()
+        .lock()
+        .map(|state| state.fullscreen)
+        .unwrap_or(false)
 }
 
 fn ui_emit_line(line: String) {
@@ -877,11 +898,12 @@ fn run_guided_test_flow(
     } else {
         for iso_name in &selected_isos {
             let extract_label = format!("extract {}", iso_name);
-            let extraction_result = run_with_spinner(!json && !ui_is_fullscreen(), &extract_label, || {
-                extract_casper(&layout, iso_name)?;
-                ensure_profile_for_iso_name(&layout, iso_name)?;
-                Ok(())
-            });
+            let extraction_result =
+                run_with_spinner(!json && !ui_is_fullscreen(), &extract_label, || {
+                    extract_casper(&layout, iso_name)?;
+                    ensure_profile_for_iso_name(&layout, iso_name)?;
+                    Ok(())
+                });
             match extraction_result {
                 Ok(()) => {
                     if !json {
@@ -929,7 +951,10 @@ fn run_guided_test_flow(
     let efi_binaries = resolve_efi_binaries_for_stage(&layout)?;
     if !json && efi_binaries.copied_from_bundle {
         ui_section("Cache");
-        ui_ok(&format!("Populated cache binaries from {}", efi_binaries.source));
+        ui_ok(&format!(
+            "Populated cache binaries from {}",
+            efi_binaries.source
+        ));
     }
     let staged = stage_efi(
         &layout,
@@ -1005,10 +1030,7 @@ fn run_guided_test_flow(
         } else {
             extracted_targets.join(", ")
         };
-        ui_kv(
-            "Extracted ISO(s)",
-            &extracted_iso_summary,
-        );
+        ui_kv("Extracted ISO(s)", &extracted_iso_summary);
         ui_kv("Generated config", &generated_cfg.display().to_string());
         ui_kv("Staged EFI dir", &staged.display().to_string());
     }
@@ -1230,7 +1252,9 @@ struct DownloadedEfiAssets {
     source: String,
 }
 
-fn download_release_efi_assets(layout: &PartBootLayout) -> Result<Option<DownloadedEfiAssets>, String> {
+fn download_release_efi_assets(
+    layout: &PartBootLayout,
+) -> Result<Option<DownloadedEfiAssets>, String> {
     #[cfg(not(windows))]
     {
         let _ = layout;
@@ -1405,7 +1429,8 @@ fn parse_checksum_manifest(content: &str) -> Result<Vec<(String, String)>, Strin
 }
 
 fn file_crc32_hex(path: &Path) -> Result<String, String> {
-    let bytes = fs::read(path).map_err(|error| format!("failed to read {}: {}", path.display(), error))?;
+    let bytes =
+        fs::read(path).map_err(|error| format!("failed to read {}: {}", path.display(), error))?;
     Ok(format!("{:08X}", crc32(&bytes)))
 }
 
@@ -1431,11 +1456,13 @@ struct WindowsVolume {
 fn run_start_interactive(
     include_diagnostics: bool,
     dry_run_install: bool,
+    skip_boot_entry: bool,
 ) -> Result<(), String> {
     #[cfg(not(windows))]
     {
         let _ = include_diagnostics;
         let _ = dry_run_install;
+        let _ = skip_boot_entry;
         return Err("start is currently Windows only".to_string());
     }
 
@@ -1444,7 +1471,7 @@ fn run_start_interactive(
         let spinner = crate::spinner::Spinner::new("Scanning partitions");
         let volumes = list_windows_volumes()?;
         spinner.finish("Partition scan complete");
-        
+
         let root_candidates: Vec<WindowsVolume> = volumes
             .iter()
             .filter(|volume| volume.filesystem.eq_ignore_ascii_case("NTFS"))
@@ -1497,8 +1524,31 @@ fn run_start_interactive(
             );
             ui_kv(
                 "Install mode",
-                if dry_run_install { "dry-run" } else { "write changes" },
+                if dry_run_install {
+                    "dry-run"
+                } else {
+                    "write changes"
+                },
             );
+            let boot_entry_status = if skip_boot_entry {
+                "skip"
+            } else if dry_run_install {
+                "skipped (dry-run)"
+            } else {
+                #[cfg(windows)]
+                {
+                    if check_admin_status() {
+                        "create after install (elevated)"
+                    } else {
+                        "skipped (run as Admin to enable)"
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    "n/a"
+                }
+            };
+            ui_kv("Firmware boot entry", boot_entry_status);
 
             if !confirm_run_plan(dry_run_install)? {
                 ui_warn("Cancelled before execution.");
@@ -1506,8 +1556,8 @@ fn run_start_interactive(
             }
 
             let result = run_guided_test_flow(
-                root,
-                esp,
+                root.clone(),
+                esp.clone(),
                 partition_uuid,
                 partition_label,
                 None,
@@ -1515,6 +1565,35 @@ fn run_start_interactive(
                 false,
                 dry_run_install,
             );
+            if let Err(error) = &result {
+                ui_warn(&format!("Guided flow failed: {error}"));
+                wait_for_exit_acknowledgement()?;
+                return result;
+            }
+
+            if !skip_boot_entry && !dry_run_install {
+                match offer_boot_entry_creation(&esp, &root) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        ui_warn(&format!("Boot entry step skipped: {error}"));
+                    }
+                }
+            } else if skip_boot_entry {
+                ui_section("Boot Entry");
+                ui_warn("Firmware boot entry creation skipped (--skip-boot-entry)");
+                ui_kv(
+                    "Manual alternative",
+                    "partboot boot-entry create --esp <path> --root <path> --label PartBoot",
+                );
+            } else {
+                ui_section("Boot Entry");
+                ui_warn("Firmware boot entry creation skipped (dry-run mode)");
+                ui_kv(
+                    "After install",
+                    "Run: partboot boot-entry create --esp <path> --root <path> --label PartBoot",
+                );
+            }
+
             wait_for_exit_acknowledgement()?;
             result
         })
@@ -1531,7 +1610,10 @@ fn choose_volume_tui(
     use crossterm::event::{read, Event, KeyCode, KeyEventKind};
     use crossterm::execute;
     use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
-    use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
+    use crossterm::terminal::{
+        disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
+        LeaveAlternateScreen,
+    };
 
     struct TuiGuard {
         owns_terminal: bool,
@@ -1628,27 +1710,29 @@ fn choose_volume_tui(
                     continue;
                 }
                 match key_event.code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    selected = if selected == 0 {
-                        volumes.len() - 1
-                    } else {
-                        selected - 1
-                    };
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    selected = (selected + 1) % volumes.len();
-                }
-                KeyCode::Enter => return Ok(volumes[selected].clone()),
-                KeyCode::Esc | KeyCode::Char('q') => return Err("selection cancelled".to_string()),
-                KeyCode::Char(ch) if ch.is_ascii_digit() => {
-                    if let Some(digit) = ch.to_digit(10) {
-                        let index = digit as usize;
-                        if index >= 1 && index <= volumes.len() {
-                            selected = index - 1;
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        selected = if selected == 0 {
+                            volumes.len() - 1
+                        } else {
+                            selected - 1
+                        };
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        selected = (selected + 1) % volumes.len();
+                    }
+                    KeyCode::Enter => return Ok(volumes[selected].clone()),
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        return Err("selection cancelled".to_string())
+                    }
+                    KeyCode::Char(ch) if ch.is_ascii_digit() => {
+                        if let Some(digit) = ch.to_digit(10) {
+                            let index = digit as usize;
+                            if index >= 1 && index <= volumes.len() {
+                                selected = index - 1;
+                            }
                         }
                     }
-                }
-                _ => {}
+                    _ => {}
                 }
             }
             _ => {}
@@ -1679,6 +1763,115 @@ fn wait_for_exit_acknowledgement() -> Result<(), String> {
         .read_line(&mut input)
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[cfg(windows)]
+fn offer_boot_entry_creation(esp: &Path, root: &Path) -> Result<(), String> {
+    ui_section("Firmware Boot Entry");
+
+    let secure_boot = crate::boot_entry::secure_boot_state();
+    let secure_boot_label = match secure_boot {
+        Some(true) => "enabled (may block unsigned EFI binaries)",
+        Some(false) => "disabled",
+        None => "unknown",
+    };
+    ui_kv("Secure Boot", secure_boot_label);
+
+    let existing = list_firmware_entries(true);
+    match existing {
+        Ok(entries) if !entries.is_empty() => {
+            ui_kv("Existing PartBoot entries", &format!("{}", entries.len()));
+            for entry in &entries {
+                ui_kv(
+                    "  Entry",
+                    &format!(
+                        "{} ({})",
+                        entry.identifier,
+                        entry.description.as_deref().unwrap_or("no description")
+                    ),
+                );
+            }
+        }
+        Ok(_) => {}
+        Err(_) => {
+            ui_kv(
+                "Existing entries",
+                "could not enumerate (run elevated to see current entries)",
+            );
+        }
+    }
+
+    let has_admin = check_admin_status();
+    if !has_admin {
+        ui_warn("Elevated shell required for boot entry creation");
+        ui_kv(
+            "Run later as Admin",
+            "partboot boot-entry create --esp <path> --root <path> --label PartBoot",
+        );
+        return Ok(());
+    }
+
+    print!("\nCreate a persistent UEFI boot entry for PartBoot? [y/N]: ");
+    io::stdout().flush().map_err(|error| error.to_string())?;
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|error| error.to_string())?;
+    let entered = input.trim().to_ascii_lowercase();
+    if !matches!(entered.as_str(), "y" | "yes") {
+        ui_warn("Boot entry creation skipped");
+        ui_kv(
+            "Run later",
+            "partboot boot-entry create --esp <path> --root <path> --label PartBoot",
+        );
+        return Ok(());
+    }
+
+    let label = "PartBoot";
+    ui_ok(&format!("Creating firmware boot entry '{label}'..."));
+
+    let result = create_boot_entry(esp, Some(root), label, None, true, false)?;
+
+    if result.reused_existing {
+        ui_ok(&format!(
+            "Reused existing firmware entry {}",
+            result.identifier
+        ));
+    } else {
+        ui_ok(&format!("Created firmware entry {}", result.identifier));
+    }
+    ui_kv("Label", &result.label);
+    ui_kv("Loader", &result.loader);
+    ui_kv("Placement", "first (top of boot order)");
+    if let Some(path) = &result.backup_path {
+        ui_kv("BCD backup", &path.display().to_string());
+        ui_kv(
+            "Restore command",
+            &format!("partboot boot-entry restore --backup {}", path.display()),
+        );
+    }
+    ui_ok("Boot entry created successfully");
+    Ok(())
+}
+
+#[cfg(windows)]
+fn check_admin_status() -> bool {
+    let output = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "[bool]([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
+        ])
+        .output();
+    match output {
+        Ok(output) => {
+            let value = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .to_ascii_lowercase();
+            output.status.success() && value == "true"
+        }
+        Err(_) => false,
+    }
 }
 
 fn detect_partition_uuid(drive: &str) -> Result<String, String> {
@@ -1824,7 +2017,10 @@ fn doctor_extracted_status(layout: &PartBootLayout) -> Result<String, String> {
     let complete = linux_images
         .iter()
         .filter(|image| {
-            is_complete_extracted(layout, &crate::extract::extracted_id_from_iso_name(&image.name))
+            is_complete_extracted(
+                layout,
+                &crate::extract::extracted_id_from_iso_name(&image.name),
+            )
         })
         .count();
     if complete == linux_images.len() {
@@ -1899,7 +2095,10 @@ fn install_esp(
     ui_kv("Destination", &destination.display().to_string());
 
     if dry_run {
-        ui_kv("Dry-run", &format!("would create {}", destination.display()));
+        ui_kv(
+            "Dry-run",
+            &format!("would create {}", destination.display()),
+        );
         ui_kv("Dry-run", "would copy grubx64.efi");
         ui_kv("Dry-run", "would copy grub.cfg");
         ui_kv("Dry-run", "no files changed");
@@ -1965,7 +2164,10 @@ fn install_fallback(
     }
 
     if dry_run {
-        ui_kv("Dry-run", &format!("would create {}", destination.display()));
+        ui_kv(
+            "Dry-run",
+            &format!("would create {}", destination.display()),
+        );
         ui_kv("Dry-run", "would copy bootx64.efi");
         ui_kv("Dry-run", "would copy grubx64.efi");
         ui_kv("Dry-run", "would copy grub.cfg");
@@ -1986,7 +2188,10 @@ fn install_fallback(
         "Installed fallback EFI files in {}",
         destination.display()
     ));
-    ui_kv("Next", "reboot and choose the UEFI entry for this disk/partition");
+    ui_kv(
+        "Next",
+        "reboot and choose the UEFI entry for this disk/partition",
+    );
     Ok(())
 }
 
@@ -2342,7 +2547,7 @@ fn print_help() {
     println!("Usage: partboot <command> [options]");
     println!();
     println!("Quick start:");
-    println!("  partboot start [--include-diagnostics] [--dry-run-install]");
+    println!("  partboot start [--include-diagnostics] [--dry-run-install] [--skip-boot-entry]");
     println!("  partboot guided-test-flow --root <path> --esp <path> --partition-uuid <uuid> [--partition-label <label>] [--iso <name>] [--include-diagnostics] [--dry-run-install] [--json]");
     println!();
     println!("Core commands:");
@@ -2553,8 +2758,8 @@ mod tests {
 
     #[test]
     fn parse_doctor_command_with_esp() {
-        let command = parse_command(&args(&["doctor", "--root", "H:/partboot", "--esp", "S:/"]))
-            .unwrap();
+        let command =
+            parse_command(&args(&["doctor", "--root", "H:/partboot", "--esp", "S:/"])).unwrap();
         assert_eq!(
             command,
             Command::Doctor {
@@ -2612,20 +2817,39 @@ mod tests {
 
     #[test]
     fn parse_start_command() {
-        let command = parse_command(&args(&["start", "--include-diagnostics", "--dry-run-install"]))
-            .unwrap();
+        let command = parse_command(&args(&[
+            "start",
+            "--include-diagnostics",
+            "--dry-run-install",
+        ]))
+        .unwrap();
         assert_eq!(
             command,
             Command::StartInteractive {
                 include_diagnostics: true,
-                dry_run_install: true
+                dry_run_install: true,
+                skip_boot_entry: false,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_start_command_with_skip_boot_entry() {
+        let command = parse_command(&args(&["start", "--skip-boot-entry"])).unwrap();
+        assert_eq!(
+            command,
+            Command::StartInteractive {
+                include_diagnostics: false,
+                dry_run_install: false,
+                skip_boot_entry: true,
             }
         );
     }
 
     #[test]
     fn parse_boot_entry_list_command() {
-        let command = parse_command(&args(&["boot-entry", "list", "--partboot-only", "--json"])).unwrap();
+        let command =
+            parse_command(&args(&["boot-entry", "list", "--partboot-only", "--json"])).unwrap();
         assert_eq!(
             command,
             Command::BootEntryList {

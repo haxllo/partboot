@@ -23,11 +23,10 @@ pub fn cache_dir() -> Result<PathBuf, String> {
         PathBuf::from(app_data).join("partboot")
     } else {
         // Unix: $XDG_CACHE_HOME/partboot or ~/.cache/partboot
-        let cache_base = std::env::var("XDG_CACHE_HOME").ok()
-            .unwrap_or_else(|| {
-                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                format!("{}/.cache", home)
-            });
+        let cache_base = std::env::var("XDG_CACHE_HOME").ok().unwrap_or_else(|| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            format!("{}/.cache", home)
+        });
         PathBuf::from(cache_base).join("partboot")
     };
 
@@ -50,7 +49,8 @@ fn cache_key_from_iso(iso_path: &Path) -> Result<String, String> {
         .map_err(|e| e.to_string())?
         .as_secs();
 
-    Ok(format!("{}_{}_{}",
+    Ok(format!(
+        "{}_{}_{}",
         name.replace(".iso", "").replace(".ISO", ""),
         metadata.len(),
         mtime
@@ -68,8 +68,8 @@ pub fn load_from_cache(iso_path: &Path) -> Result<Option<IsoMetadataCache>, Stri
     }
 
     let content = fs::read_to_string(&cache_file).map_err(|e| e.to_string())?;
-    let cached: IsoMetadataCache = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse cache: {}", e))?;
+    let cached: IsoMetadataCache =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse cache: {}", e))?;
 
     Ok(Some(cached))
 }

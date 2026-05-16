@@ -346,9 +346,12 @@ mod tests {
         };
         let cfg = generate_grub_cfg(&[image], "ABCD-1234", None, false, &[]);
         assert!(cfg.contains("loopback loop_fedora_workstation_iso"));
-        assert!(cfg.contains("if [ -f (loop_fedora_workstation_iso)/images/pxeboot/vmlinuz ]; then"));
+        assert!(
+            cfg.contains("if [ -f (loop_fedora_workstation_iso)/images/pxeboot/vmlinuz ]; then")
+        );
         assert!(cfg.contains("elif [ -f (loop_fedora_workstation_iso)/isolinux/vmlinuz ]; then"));
-        assert!(cfg.contains("elif [ -f (loop_fedora_workstation_iso)/boot/x86_64/loader/linux ]; then"));
+        assert!(cfg
+            .contains("elif [ -f (loop_fedora_workstation_iso)/boot/x86_64/loader/linux ]; then"));
     }
 
     #[test]
@@ -376,8 +379,12 @@ mod tests {
             extracted_id: None,
         };
         let cfg = generate_grub_cfg(&[image], "D826AD8826AD67E8", None, false, &[]);
-        assert!(cfg.contains("(loop_archlinux_2026_01_01_x86_64_iso)/arch/boot/x86_64/vmlinuz-linux "));
-        assert!(cfg.contains("(loop_archlinux_2026_01_01_x86_64_iso)/arch/boot/x86_64/initramfs-linux.img"));
+        assert!(
+            cfg.contains("(loop_archlinux_2026_01_01_x86_64_iso)/arch/boot/x86_64/vmlinuz-linux ")
+        );
+        assert!(cfg.contains(
+            "(loop_archlinux_2026_01_01_x86_64_iso)/arch/boot/x86_64/initramfs-linux.img"
+        ));
     }
 
     #[test]
@@ -405,7 +412,11 @@ mod tests {
             extracted_id: None,
         };
         let cfg = generate_grub_cfg(&[image], "D826AD8826AD67E8", None, false, &[]);
-        assert!(cfg.contains("(loop_cachyos_desktop_linux_250713_iso)/arch/boot/x86_64/vmlinuz-linux-cachyos "));
-        assert!(cfg.contains("(loop_cachyos_desktop_linux_250713_iso)/arch/boot/x86_64/initramfs-linux-cachyos.img"));
+        assert!(cfg.contains(
+            "(loop_cachyos_desktop_linux_250713_iso)/arch/boot/x86_64/vmlinuz-linux-cachyos "
+        ));
+        assert!(cfg.contains(
+            "(loop_cachyos_desktop_linux_250713_iso)/arch/boot/x86_64/initramfs-linux-cachyos.img"
+        ));
     }
 }
