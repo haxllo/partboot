@@ -1,9 +1,9 @@
 cargo +stable-x86_64-pc-windows-gnu run -- init --root H:\partboot
 cargo +stable-x86_64-pc-windows-gnu run -- scan --root H:\partboot
 cargo +stable-x86_64-pc-windows-gnu run -- extract --root H:\partboot --iso ubuntu-22.04.5-desktop-amd64.iso
-cargo +stable-x86_64-pc-windows-gnu run -- volume-id --drive H:
-cargo +stable-x86_64-pc-windows-gnu run -- generate-menu --root H:\partboot --partition-uuid 9412B8E612B8CF0C --partition-label partboottest
-cargo +stable-x86_64-pc-windows-gnu run -- stage-efi --root H:\partboot --grub-x64 H:\partboot\cache\grubx64.efi --boot-x64 H:\partboot\cache\bootx64.efi
-cargo +stable-x86_64-pc-windows-gnu run -- install-esp --root H:\partboot --esp S:\ --force
-cargo +stable-x86_64-pc-windows-gnu run -- install-fallback --root H:\partboot --esp S:\ --force
+cargo +stable-x86_64-pc-windows-gnu run -- vol --drive H:
+cargo +stable-x86_64-pc-windows-gnu run -- menu --root H:\partboot --uuid 9412B8E612B8CF0C --label partboottest
+cargo +stable-x86_64-pc-windows-gnu run -- stage --root H:\partboot --grub-x64 H:\partboot\cache\grubx64.efi --boot-x64 H:\partboot\cache\bootx64.efi
+cargo +stable-x86_64-pc-windows-gnu run -- esp --root H:\partboot --esp S:\ --force
+cargo +stable-x86_64-pc-windows-gnu run -- fallback --root H:\partboot --esp S:\ --force
 cargo +stable-x86_64-pc-windows-gnu run -- doctor --root H:\partboot --esp S:\

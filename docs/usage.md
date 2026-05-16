@@ -47,14 +47,14 @@ partboot start
 Review generated files, then install staged EFI files:
 
 ```powershell
-partboot install-esp --root H:\partboot --esp S:\ --force
-partboot boot-instructions --esp S:\
+partboot esp --root H:\partboot --esp S:\ --force
+partboot boot --esp S:\
 ```
 
 Use `--dry-run` instead of `--force` when validating the target paths:
 
 ```powershell
-partboot install-esp --root H:\partboot --esp S:\ --dry-run
+partboot esp --root H:\partboot --esp S:\ --dry-run
 ```
 
 ## Command Reference
@@ -64,7 +64,7 @@ partboot install-esp --root H:\partboot --esp S:\ --dry-run
 Run the guided TUI workflow.
 
 ```powershell
-partboot start [--include-diagnostics] [--dry-run-install]
+partboot start [--diagnostics] [--dry-run]
 ```
 
 ### `init`
@@ -94,58 +94,58 @@ partboot extract --root H:\partboot --iso ubuntu-24.04-desktop-amd64.iso
 
 The ISO can be a name inside `isos\` or a full path.
 
-### `volume-id`
+### `vol`
 
 Print the partition identifier to use in generated GRUB menus.
 
 ```powershell
-partboot volume-id --drive H:
+partboot vol --drive H:
 ```
 
 For NTFS, use the full NTFS serial. Short serials such as `12B8CF0C` are rejected because GRUB expects the full identifier, for example `9412B8E612B8CF0C`.
 
-### `generate-menu`
+### `menu`
 
 Generate `generated\grub.cfg`.
 
 ```powershell
-partboot generate-menu --root H:\partboot --partition-uuid 9412B8E612B8CF0C --partition-label PARTBOOT
-partboot generate-menu --root H:\partboot --partition-uuid 9412B8E612B8CF0C --include-diagnostics
-partboot generate-menu --root H:\partboot --partition-uuid 9412B8E612B8CF0C --json
+partboot menu --root H:\partboot --uuid 9412B8E612B8CF0C --label PARTBOOT
+partboot menu --root H:\partboot --uuid 9412B8E612B8CF0C --diagnostics
+partboot menu --root H:\partboot --uuid 9412B8E612B8CF0C --json
 ```
 
-### `stage-efi`
+### `stage`
 
 Stage EFI files without writing to a real EFI system partition.
 
 ```powershell
-partboot stage-efi --root H:\partboot --grub-x64 C:\tmp\grubx64.efi --boot-x64 C:\tmp\bootx64.efi
+partboot stage --root H:\partboot --grub-x64 C:\tmp\grubx64.efi --boot-x64 C:\tmp\bootx64.efi
 ```
 
-### `install-esp`
+### `esp`
 
 Copy staged EFI files to an EFI system partition. The command requires either `--dry-run` or `--force`.
 
 ```powershell
-partboot install-esp --root H:\partboot --esp S:\ --dry-run
-partboot install-esp --root H:\partboot --esp S:\ --force
+partboot esp --root H:\partboot --esp S:\ --dry-run
+partboot esp --root H:\partboot --esp S:\ --force
 ```
 
-### `install-fallback`
+### `fallback`
 
 Copy the loader to the UEFI fallback path `EFI\Boot\bootx64.efi`.
 
 ```powershell
-partboot install-fallback --root H:\partboot --esp S:\ --dry-run
-partboot install-fallback --root H:\partboot --esp S:\ --force
+partboot fallback --root H:\partboot --esp S:\ --dry-run
+partboot fallback --root H:\partboot --esp S:\ --force
 ```
 
-### `boot-instructions`
+### `boot`
 
 Print the firmware boot path.
 
 ```powershell
-partboot boot-instructions --esp S:\
+partboot boot --esp S:\
 ```
 
 ### `doctor`
@@ -163,42 +163,42 @@ partboot doctor --root H:\partboot --esp S:\ --json
 Run scan, extraction, menu generation, and EFI staging in one command.
 
 ```powershell
-partboot guided-test-flow --root H:\partboot --esp S:\ --partition-uuid 9412B8E612B8CF0C --partition-label PARTBOOT
+partboot guided-test-flow --root H:\partboot --esp S:\ --uuid 9412B8E612B8CF0C --label PARTBOOT
 ```
 
 Optional flags:
 
 - `--iso <name>`: process one ISO.
-- `--include-diagnostics`: include diagnostic menu entries.
-- `--dry-run-install`: validate install steps without copying to the ESP.
+- `--diagnostics`: include diagnostic menu entries.
+- `--dry-run`: validate install steps without copying to the ESP.
 - `--json`: print machine-readable output.
 
-### `recommend-test-partitions`
+### `test`
 
 Print safe test-partition guidance.
 
 ```powershell
-partboot recommend-test-partitions
+partboot test
 ```
 
-### `boot-entry list`
+### `entry list`
 
-List firmware boot entries. Use `--partboot-only` to show only PartBoot-managed entries.
+List firmware boot entries. Use `--partboot` to show only PartBoot-managed entries.
 
 ```powershell
-partboot boot-entry list
-partboot boot-entry list --partboot-only
-partboot boot-entry list --json
+partboot entry list
+partboot entry list --partboot
+partboot entry list --json
 ```
 
-### `boot-entry create`
+### `entry create`
 
 Create a new UEFI firmware boot entry. Requires an elevated (Administrator) shell unless `--dry-run` is used.
 
 ```powershell
-partboot boot-entry create --esp S:\ --root H:\partboot --label "PartBoot" --dry-run
-partboot boot-entry create --esp S:\ --root H:\partboot --label "PartBoot" --first
-partboot boot-entry create --esp S:\ --loader \EFI\PartBoot\grubx64.efi --label "PartBoot" --dry-run
+partboot entry create --esp S:\ --root H:\partboot --label "PartBoot" --dry-run
+partboot entry create --esp S:\ --root H:\partboot --label "PartBoot" --first
+partboot entry create --esp S:\ --loader \EFI\PartBoot\grubx64.efi --label "PartBoot" --dry-run
 ```
 
 Flags:
@@ -218,13 +218,13 @@ Safety behavior:
 - Secure Boot state is detected and reported in the output.
 - The command fails if not run as Administrator (unless `--dry-run`).
 
-### `boot-entry remove`
+### `entry remove`
 
 Remove a firmware boot entry by its GUID identifier. Requires an elevated shell unless `--dry-run` is used.
 
 ```powershell
-partboot boot-entry remove --id "{12345678-1234-1234-1234-123456789ABC}" --dry-run
-partboot boot-entry remove --id "{12345678-1234-1234-1234-123456789ABC}"
+partboot entry remove --id "{12345678-1234-1234-1234-123456789ABC}" --dry-run
+partboot entry remove --id "{12345678-1234-1234-1234-123456789ABC}"
 ```
 
 Safety behavior:
@@ -233,32 +233,32 @@ Safety behavior:
 - The BCD store is backed up before removal.
 - The identifier must be a valid GUID wrapped in braces.
 
-### `boot-entry restore`
+### `entry restore`
 
 Restore a previously exported BCD backup. Requires an elevated shell unless `--dry-run` is used.
 
 ```powershell
-partboot boot-entry restore --backup C:\Users\Me\AppData\Local\Temp\partboot-bcd-backup-1715000000.bak --dry-run
-partboot boot-entry restore --backup C:\Users\Me\AppData\Local\Temp\partboot-bcd-backup-1715000000.bak
+partboot entry restore --backup C:\Users\Me\AppData\Local\Temp\partboot-bcd-backup-1715000000.bak --dry-run
+partboot entry restore --backup C:\Users\Me\AppData\Local\Temp\partboot-bcd-backup-1715000000.bak
 ```
 
 ## Boot Entry Rollback
 
-Every `boot-entry create` and `boot-entry remove` operation exports a full BCD backup before making changes. The backup path is printed in the command output and included in JSON results.
+Every `entry create` and `entry remove` operation exports a full BCD backup before making changes. The backup path is printed in the command output and included in JSON results.
 
-### Rollback after `boot-entry create`
+### Rollback after `entry create`
 
 If the created entry causes boot issues:
 
 ```powershell
 # 1. List current entries to confirm the problematic entry
-partboot boot-entry list --partboot-only
+partboot entry list --partboot
 
 # 2. Restore the pre-create BCD backup
-partboot boot-entry restore --backup <backup-path-from-create-output>
+partboot entry restore --backup <backup-path-from-create-output>
 
 # 3. Verify restoration
-partboot boot-entry list --partboot-only
+partboot entry list --partboot
 ```
 
 Or manually with bcdedit:
@@ -267,21 +267,21 @@ Or manually with bcdedit:
 bcdedit /import <backup-path-from-create-output>
 ```
 
-### Rollback after `boot-entry remove`
+### Rollback after `entry remove`
 
 If an entry was removed by mistake:
 
 ```powershell
 # 1. Restore the pre-remove BCD backup
-partboot boot-entry restore --backup <backup-path-from-remove-output>
+partboot entry restore --backup <backup-path-from-remove-output>
 
 # 2. Verify the entry is back
-partboot boot-entry list --partboot-only
+partboot entry list --partboot
 ```
 
 ### Manual rollback with bcdedit
 
-If the `partboot boot-entry restore` command is unavailable:
+If the `partboot entry restore` command is unavailable:
 
 ```powershell
 # Must be run from an elevated Command Prompt or PowerShell
@@ -298,7 +298,7 @@ bootrec /rebuildbcd
 bootrec /fixboot
 ```
 
-Always keep the backup files printed by `boot-entry create` and `boot-entry remove` until you have confirmed the system boots correctly with the new configuration.
+Always keep the backup files printed by `entry create` and `entry remove` until you have confirmed the system boots correctly with the new configuration.
 
 ## Supported ISO Families
 
