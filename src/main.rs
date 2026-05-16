@@ -34,11 +34,37 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 
+fn partboot_styles() -> clap::builder::Styles {
+    use clap::builder::styling::AnsiColor;
+    clap::builder::Styles::styled()
+        .header(AnsiColor::Green.on_default().bold())
+        .literal(AnsiColor::Cyan.on_default().bold())
+        .usage(AnsiColor::Green.on_default().bold())
+}
+
 #[derive(Parser)]
-#[command(name = "partboot", version, about = "Disk-resident ISO boot manager", long_about = None)]
+#[command(
+    name = "partboot",
+    bin_name = "partboot",
+    version,
+    about = "Disk-resident ISO boot manager\n\nSee 'partboot help <command>' for more information on a specific command.",
+    long_about = "\
+PartBoot is a disk-resident ISO boot manager for UEFI systems. It lets you
+keep Linux ISO images on a local partition and boot them through a generated
+GRUB menu instead of preparing a USB drive for each installer or live image.
+
+See 'partboot help <command>' for more information on a specific command.",
+    max_term_width = 120,
+    color = clap::ColorChoice::Always,
+    styles = partboot_styles(),
+    help_template = "\u{1b}[1m\u{1b}[32mUsage:\u{1b}[0m\n  {usage}\n\n\u{1b}[1m\u{1b}[32mCommands:\u{1b}[0m\n{subcommands}\n\n\u{1b}[1m\u{1b}[32mOptions:\u{1b}[0m\n{options}",
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+    /// Output results as JSON
+    #[arg(long, global = true)]
+    json: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
@@ -59,18 +85,18 @@ enum Command {
         json: bool,
     },
     /// Generate GRUB configuration for discovered ISOs
-    GenerateMenu {
+    Menu {
         /// Path to the PartBoot root directory
         #[arg(long)]
         root: PathBuf,
         /// NTFS partition UUID (short hex or full)
-        #[arg(long)]
+        #[arg(long = "uuid")]
         partition_uuid: String,
         /// NTFS partition label (optional, improves GRUB menu display)
-        #[arg(long)]
+        #[arg(long = "label")]
         partition_label: Option<String>,
         /// Include a diagnostics boot entry
-        #[arg(long)]
+        #[arg(long = "diagnostics")]
         include_diagnostics: bool,
         /// Output results as JSON
         #[arg(long)]
@@ -89,7 +115,7 @@ enum Command {
         iso: String,
     },
     /// Stage EFI binaries into the PartBoot efi/ directory
-    StageEfi {
+    Stage {
         /// Path to the PartBoot root directory
         #[arg(long)]
         root: PathBuf,
@@ -104,7 +130,7 @@ enum Command {
         output: Option<PathBuf>,
     },
     /// Install PartBoot EFI files to the ESP
-    InstallEsp {
+    Esp {
         /// Path to the PartBoot root directory
         #[arg(long)]
         root: PathBuf,
@@ -112,14 +138,14 @@ enum Command {
         #[arg(long)]
         esp: PathBuf,
         /// Preview changes without modifying files
-        #[arg(long)]
+        #[arg(long = "dry-run")]
         dry_run: bool,
         /// Force overwrite existing files
-        #[arg(long)]
+        #[arg(long = "force")]
         force: bool,
     },
     /// Install PartBoot as UEFI fallback boot option
-    InstallFallback {
+    Fallback {
         /// Path to the PartBoot root directory
         #[arg(long)]
         root: PathBuf,
@@ -127,14 +153,14 @@ enum Command {
         #[arg(long)]
         esp: PathBuf,
         /// Preview changes without modifying files
-        #[arg(long)]
+        #[arg(long = "dry-run")]
         dry_run: bool,
         /// Force overwrite existing files
         #[arg(long)]
         force: bool,
     },
     /// Show manual boot instructions for the ESP
-    BootInstructions {
+    Boot {
         /// Path to the EFI System Partition
         #[arg(long)]
         esp: PathBuf,
@@ -160,37 +186,37 @@ enum Command {
         #[arg(long)]
         esp: Option<PathBuf>,
         /// NTFS partition UUID (required with --root and --esp)
-        #[arg(long)]
+        #[arg(long = "uuid")]
         partition_uuid: Option<String>,
         /// NTFS partition label
-        #[arg(long)]
+        #[arg(long = "label")]
         partition_label: Option<String>,
         /// Extract only this ISO file name
         #[arg(long)]
         iso: Option<String>,
         /// Include a diagnostics boot entry
-        #[arg(long)]
+        #[arg(long = "diagnostics")]
         include_diagnostics: bool,
         /// Preview install without modifying files
-        #[arg(long)]
+        #[arg(long = "dry-run")]
         dry_run_install: bool,
         /// Skip firmware boot entry creation
-        #[arg(long)]
+        #[arg(long = "skip-entry")]
         skip_boot_entry: bool,
         /// Output results as JSON
         #[arg(long)]
         json: bool,
     },
     /// Display the NTFS volume ID for a drive letter
-    VolumeId {
+    Vol {
         /// Windows drive letter (e.g. H or H:)
         #[arg(long)]
         drive: String,
     },
     /// Print safe test-partition guidance
-    RecommendTestPartitions,
+    Test,
     /// Manage UEFI firmware boot entries
-    #[command(subcommand)]
+    #[command(name = "entry", subcommand)]
     BootEntry(BootEntryCommand),
 }
 
@@ -199,7 +225,7 @@ enum BootEntryCommand {
     /// List firmware boot entries
     List {
         /// Show only PartBoot-managed entries
-        #[arg(long)]
+        #[arg(long = "partboot")]
         partboot_only: bool,
         /// Output results as JSON
         #[arg(long)]
@@ -220,10 +246,10 @@ enum BootEntryCommand {
         #[arg(long)]
         loader: Option<String>,
         /// Add entry to the top of the boot order
-        #[arg(long)]
+        #[arg(long = "first")]
         first: bool,
         /// Validate inputs without modifying firmware
-        #[arg(long)]
+        #[arg(long = "dry-run")]
         dry_run: bool,
         /// Output results as JSON
         #[arg(long)]
@@ -235,7 +261,7 @@ enum BootEntryCommand {
         #[arg(long)]
         id: String,
         /// Validate inputs without modifying firmware
-        #[arg(long)]
+        #[arg(long = "dry-run")]
         dry_run: bool,
         /// Output results as JSON
         #[arg(long)]
@@ -247,7 +273,7 @@ enum BootEntryCommand {
         #[arg(long)]
         backup: PathBuf,
         /// Validate inputs without modifying firmware
-        #[arg(long)]
+        #[arg(long = "dry-run")]
         dry_run: bool,
         /// Output results as JSON
         #[arg(long)]
@@ -326,7 +352,7 @@ fn run(command: Command) -> Result<(), String> {
                 }
             }
         }
-        Command::GenerateMenu {
+        Command::Menu {
             root,
             partition_uuid,
             partition_label,
@@ -377,7 +403,7 @@ fn run(command: Command) -> Result<(), String> {
                 layout.extracted.join(extracted_id).display()
             );
         }
-        Command::StageEfi {
+        Command::Stage {
             root,
             grub_x64,
             boot_x64,
@@ -388,7 +414,7 @@ fn run(command: Command) -> Result<(), String> {
             println!("staged EFI files in {}", staged.display());
             println!("next: inspect the staged files before copying anything to a real ESP");
         }
-        Command::InstallEsp {
+        Command::Esp {
             root,
             esp,
             dry_run,
@@ -396,7 +422,7 @@ fn run(command: Command) -> Result<(), String> {
         } => {
             install_esp(&PartBootLayout::new(root), &esp, dry_run, force)?;
         }
-        Command::InstallFallback {
+        Command::Fallback {
             root,
             esp,
             dry_run,
@@ -404,7 +430,7 @@ fn run(command: Command) -> Result<(), String> {
         } => {
             install_fallback(&PartBootLayout::new(root), &esp, dry_run, force)?;
         }
-        Command::BootInstructions { esp } => {
+        Command::Boot { esp } => {
             print_boot_instructions(&esp)?;
         }
         Command::Doctor { root, esp, json } => {
@@ -469,10 +495,10 @@ fn run(command: Command) -> Result<(), String> {
                 run_start_interactive(include_diagnostics, dry_run_install, skip_boot_entry, json)?;
             }
         }
-        Command::VolumeId { drive } => {
+        Command::Vol { drive } => {
             print_volume_id(&drive)?;
         }
-        Command::RecommendTestPartitions => {
+        Command::Test => {
             print_partition_recommendation();
         }
         Command::BootEntry(sub) => match sub {
@@ -933,7 +959,7 @@ fn run_start_scripted(
     mark_extracted_images(&layout, &mut images);
     let profiles = load_profiles_for_images(&layout, &images)?;
     let generated_cfg = layout.grub_cfg_path();
-    run_with_spinner(!json && !ui_is_fullscreen(), "generate-menu", || {
+    run_with_spinner(!json && !ui_is_fullscreen(), "menu", || {
         let cfg = generate_grub_cfg(
             &images,
             &partition_uuid,
@@ -1585,7 +1611,7 @@ fn run_start_interactive(
                 }
             } else if skip_boot_entry {
                 ui_section("Boot Entry");
-                ui_warn("Firmware boot entry creation skipped (--skip-boot-entry)");
+                ui_warn("Firmware boot entry creation skipped (--skip)");
                 ui_kv(
                     "Manual alternative",
                     "partboot boot-entry create --esp <path> --root <path> --label PartBoot",
@@ -2118,7 +2144,7 @@ fn install_esp(
     force: bool,
 ) -> Result<(), String> {
     if !dry_run && !force {
-        return Err("install-esp requires --dry-run or --force".to_string());
+        return Err("install-esp requires --dry or --force".to_string());
     }
 
     if !esp.exists() {
@@ -2177,7 +2203,7 @@ fn install_fallback(
     force: bool,
 ) -> Result<(), String> {
     if !dry_run && !force {
-        return Err("install-fallback requires --dry-run or --force".to_string());
+        return Err("install-fallback requires --dry or --force".to_string());
     }
 
     validate_esp_filesystem(esp)?;
@@ -2381,7 +2407,7 @@ fn print_volume_id(drive: &str) -> Result<(), String> {
             println!("filesystem: NTFS");
             println!("windows-serial: 0x{uuid}");
             println!("grub-fs-uuid-candidate: {uuid}");
-            println!("use: --partition-uuid {uuid}");
+            println!("use: --uuid {uuid}");
             return Ok(());
         }
 
@@ -2723,17 +2749,17 @@ mod tests {
     fn clap_parse_generate_menu_command() {
         let cli = Cli::parse_from([
             "partboot",
-            "generate-menu",
+            "menu",
             "--root",
             "X:/partboot",
-            "--partition-uuid",
+            "--uuid",
             "ABCD-1234",
             "--output",
             "X:/partboot/generated/grub.cfg",
         ]);
         assert_eq!(
             cli.command,
-            Some(Command::GenerateMenu {
+            Some(Command::Menu {
                 root: PathBuf::from("X:/partboot"),
                 partition_uuid: "ABCD-1234".to_string(),
                 partition_label: None,
@@ -2765,10 +2791,10 @@ mod tests {
 
     #[test]
     fn clap_parse_volume_id_command() {
-        let cli = Cli::parse_from(["partboot", "volume-id", "--drive", "H:"]);
+        let cli = Cli::parse_from(["partboot", "vol", "--drive", "H:"]);
         assert_eq!(
             cli.command,
-            Some(Command::VolumeId {
+            Some(Command::Vol {
                 drive: "H:".to_string()
             })
         );
@@ -2778,7 +2804,7 @@ mod tests {
     fn clap_parse_stage_efi_command() {
         let cli = Cli::parse_from([
             "partboot",
-            "stage-efi",
+            "stage",
             "--root",
             "X:/partboot",
             "--grub-x64",
@@ -2788,7 +2814,7 @@ mod tests {
         ]);
         assert_eq!(
             cli.command,
-            Some(Command::StageEfi {
+            Some(Command::Stage {
                 root: PathBuf::from("X:/partboot"),
                 grub_x64: PathBuf::from("C:/tmp/grubx64.efi"),
                 boot_x64: None,
@@ -2801,7 +2827,7 @@ mod tests {
     fn clap_parse_install_esp_command() {
         let cli = Cli::parse_from([
             "partboot",
-            "install-esp",
+            "esp",
             "--root",
             "H:/partboot",
             "--esp",
@@ -2810,7 +2836,7 @@ mod tests {
         ]);
         assert_eq!(
             cli.command,
-            Some(Command::InstallEsp {
+            Some(Command::Esp {
                 root: PathBuf::from("H:/partboot"),
                 esp: PathBuf::from("S:/"),
                 dry_run: true,
@@ -2823,7 +2849,7 @@ mod tests {
     fn clap_parse_install_fallback_command() {
         let cli = Cli::parse_from([
             "partboot",
-            "install-fallback",
+            "fallback",
             "--root",
             "H:/partboot",
             "--esp",
@@ -2832,7 +2858,7 @@ mod tests {
         ]);
         assert_eq!(
             cli.command,
-            Some(Command::InstallFallback {
+            Some(Command::Fallback {
                 root: PathBuf::from("H:/partboot"),
                 esp: PathBuf::from("S:/"),
                 dry_run: false,
@@ -2843,10 +2869,10 @@ mod tests {
 
     #[test]
     fn clap_parse_boot_instructions_command() {
-        let cli = Cli::parse_from(["partboot", "boot-instructions", "--esp", "S:/"]);
+        let cli = Cli::parse_from(["partboot", "boot", "--esp", "S:/"]);
         assert_eq!(
             cli.command,
-            Some(Command::BootInstructions {
+            Some(Command::Boot {
                 esp: PathBuf::from("S:/")
             })
         );
@@ -2856,16 +2882,16 @@ mod tests {
     fn clap_parse_generate_menu_with_diagnostics_flag() {
         let cli = Cli::parse_from([
             "partboot",
-            "generate-menu",
+            "menu",
             "--root",
             "X:/partboot",
-            "--partition-uuid",
+            "--uuid",
             "ABCD-1234",
-            "--include-diagnostics",
+            "--diagnostics",
         ]);
         assert_eq!(
             cli.command,
-            Some(Command::GenerateMenu {
+            Some(Command::Menu {
                 root: PathBuf::from("X:/partboot"),
                 partition_uuid: "ABCD-1234".to_string(),
                 partition_label: None,
@@ -2918,12 +2944,12 @@ mod tests {
             "H:/partboot",
             "--esp",
             "S:/",
-            "--partition-uuid",
+            "--uuid",
             "9412B8E612B8CF0C",
-            "--partition-label",
+            "--label",
             "partboottest",
-            "--include-diagnostics",
-            "--dry-run-install",
+            "--diagnostics",
+            "--dry-run",
             "--json",
         ]);
         assert_eq!(
@@ -2944,12 +2970,7 @@ mod tests {
 
     #[test]
     fn clap_parse_start_command_interactive() {
-        let cli = Cli::parse_from([
-            "partboot",
-            "start",
-            "--include-diagnostics",
-            "--dry-run-install",
-        ]);
+        let cli = Cli::parse_from(["partboot", "start", "--diagnostics", "--dry-run"]);
         assert_eq!(
             cli.command,
             Some(Command::Start {
@@ -2968,7 +2989,7 @@ mod tests {
 
     #[test]
     fn clap_parse_start_command_with_skip_boot_entry() {
-        let cli = Cli::parse_from(["partboot", "start", "--skip-boot-entry"]);
+        let cli = Cli::parse_from(["partboot", "start", "--skip-entry"]);
         assert_eq!(
             cli.command,
             Some(Command::Start {
@@ -2993,13 +3014,7 @@ mod tests {
 
     #[test]
     fn clap_parse_boot_entry_list_command() {
-        let cli = Cli::parse_from([
-            "partboot",
-            "boot-entry",
-            "list",
-            "--partboot-only",
-            "--json",
-        ]);
+        let cli = Cli::parse_from(["partboot", "entry", "list", "--partboot", "--json"]);
         assert_eq!(
             cli.command,
             Some(Command::BootEntry(BootEntryCommand::List {
@@ -3013,7 +3028,7 @@ mod tests {
     fn clap_parse_boot_entry_create_command() {
         let cli = Cli::parse_from([
             "partboot",
-            "boot-entry",
+            "entry",
             "create",
             "--esp",
             "S:/",
@@ -3043,7 +3058,7 @@ mod tests {
     fn clap_parse_boot_entry_create_command_with_root() {
         let cli = Cli::parse_from([
             "partboot",
-            "boot-entry",
+            "entry",
             "create",
             "--esp",
             "S:/",
@@ -3071,7 +3086,7 @@ mod tests {
     fn clap_parse_boot_entry_remove_command() {
         let cli = Cli::parse_from([
             "partboot",
-            "boot-entry",
+            "entry",
             "remove",
             "--id",
             "{12345678-1234-1234-1234-123456789ABC}",
@@ -3092,7 +3107,7 @@ mod tests {
     fn clap_parse_boot_entry_restore_command() {
         let cli = Cli::parse_from([
             "partboot",
-            "boot-entry",
+            "entry",
             "restore",
             "--backup",
             "C:/temp/partboot-bcd-backup.bak",
