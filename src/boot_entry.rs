@@ -390,6 +390,44 @@ fn find_existing_entry(label: &str, loader: &str) -> Result<Option<String>, Stri
 }
 
 #[cfg(windows)]
+pub fn find_partboot_entries_for_loader(loader: &str) -> Result<Vec<FirmwareBootEntry>, String> {
+    let entries = list_firmware_entries(false)?;
+    let loader_lower = loader.to_ascii_lowercase();
+    Ok(entries
+        .into_iter()
+        .filter(|entry| {
+            entry
+                .path
+                .as_deref()
+                .map(|p| p.to_ascii_lowercase() == loader_lower)
+                .unwrap_or(false)
+        })
+        .collect())
+}
+
+#[cfg(windows)]
+pub fn find_stale_partboot_entries(
+    expected_loader: &str,
+    expected_label: &str,
+) -> Result<Vec<FirmwareBootEntry>, String> {
+    let entries = list_firmware_entries(false)?;
+    let expected_loader_lower = expected_loader.to_ascii_lowercase();
+    let expected_label_lower = expected_label.to_ascii_lowercase();
+    Ok(entries
+        .into_iter()
+        .filter(|entry| {
+            let desc = entry.description.as_deref().unwrap_or_default();
+            let path = entry.path.as_deref().unwrap_or_default();
+            let is_partboot = desc.to_ascii_lowercase() == expected_label_lower
+                || path.to_ascii_lowercase().contains("\\efi\\partboot\\");
+            let matches_expected = path.to_ascii_lowercase() == expected_loader_lower
+                && desc.to_ascii_lowercase() == expected_label_lower;
+            is_partboot && !matches_expected
+        })
+        .collect())
+}
+
+#[cfg(windows)]
 fn run_bcdedit(args: &[&str]) -> Result<String, String> {
     let output = Command::new("bcdedit")
         .args(args)

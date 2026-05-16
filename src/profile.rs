@@ -3,7 +3,7 @@ use crate::iso::{classify_name, IsoFamily, IsoImage};
 use crate::layout::PartBootLayout;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootMode {
@@ -118,7 +118,7 @@ fn profile_family_name(family: &IsoFamily) -> &'static str {
     }
 }
 
-fn parse_profile(content: &str, path: &PathBuf) -> Result<IsoProfile, String> {
+fn parse_profile(content: &str, path: &Path) -> Result<IsoProfile, String> {
     let mut values = HashMap::new();
     for line in content.lines() {
         let trimmed = line.trim();
@@ -171,7 +171,7 @@ fn parse_profile(content: &str, path: &PathBuf) -> Result<IsoProfile, String> {
 fn required_value(
     values: &HashMap<String, String>,
     key: &str,
-    path: &PathBuf,
+    path: &Path,
 ) -> Result<String, String> {
     values
         .get(key)
