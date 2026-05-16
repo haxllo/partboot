@@ -47,17 +47,16 @@ fn partboot_styles() -> clap::builder::Styles {
     name = "partboot",
     bin_name = "partboot",
     version,
-    about = "Disk-resident ISO boot manager\n\nSee 'partboot help <command>' for more information on a specific command.",
+    about = "Disk-resident ISO boot manager",
     long_about = "\
 PartBoot is a disk-resident ISO boot manager for UEFI systems. It lets you
 keep Linux ISO images on a local partition and boot them through a generated
-GRUB menu instead of preparing a USB drive for each installer or live image.
-
-See 'partboot help <command>' for more information on a specific command.",
+GRUB menu instead of preparing a USB drive for each installer or live image.",
     max_term_width = 120,
     color = clap::ColorChoice::Always,
     styles = partboot_styles(),
-    help_template = "\u{1b}[1m\u{1b}[32mUsage:\u{1b}[0m\n  {usage}\n\n\u{1b}[1m\u{1b}[32mCommands:\u{1b}[0m\n{subcommands}\n\n\u{1b}[1m\u{1b}[32mOptions:\u{1b}[0m\n{options}",
+    after_help = "See 'partboot help <command>' for more information on a specific command.",
+    help_template = "{about}\n\n\u{1b}[1m\u{1b}[32mUsage:\u{1b}[0m\n  {usage}\n\n\u{1b}[1m\u{1b}[32mCommands:\u{1b}[0m\n{subcommands}\n\n\u{1b}[1m\u{1b}[32mOptions:\u{1b}[0m\n{options}\n{after-help}",
 )]
 struct Cli {
     #[command(subcommand)]
