@@ -55,7 +55,7 @@ GRUB menu instead of preparing a USB drive for each installer or live image.",
     max_term_width = 120,
     color = clap::ColorChoice::Always,
     styles = partboot_styles(),
-    after_help = "See \u{1b}[1m\u{1b}[36mpartboot help\u{1b}[0m '<command>' for more information on a specific command.",
+    after_help = "See \u{1b}[1m\u{1b}[36m'partboot help <command>'\u{1b}[0m for more information on a specific command.",
     help_template = "{about}\n\n\u{1b}[1m\u{1b}[32mUsage:\u{1b}[0m\n  {usage}\n\n\u{1b}[1m\u{1b}[32mCommands:\u{1b}[0m\n{subcommands}\n\n\u{1b}[1m\u{1b}[32mOptions:\u{1b}[0m\n{options}\n{after-help}",
 )]
 struct Cli {
